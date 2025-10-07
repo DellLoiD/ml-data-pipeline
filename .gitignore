@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# IDE/Editor
+.vscode/
+.idea/
+*.code-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Data and models (large/binary)
+dataset/
+trained_models/
+plots/
+accuracy_reports_tested_models/
+
+# Logs and reports
+*.log
+report.txt
+
+# Cache
+.ipynb_checkpoints/
+.pytest_cache/
+.cache/
+
+# Build artifacts
+build/
+dist/
