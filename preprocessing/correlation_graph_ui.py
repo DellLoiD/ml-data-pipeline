@@ -1,0 +1,149 @@
+import pandas as pd
+import os
+import seaborn as sns
+import matplotlib.pyplot as plt
+from PySide6.QtWidgets import (
+    QApplication,
+    QWidget,
+    QPushButton,
+    QFileDialog,
+    QLabel,
+    QComboBox,
+    QVBoxLayout,
+    QHBoxLayout
+)
+
+class CorrelationGraphUI(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle('График корреляции')
+        self.initUI()
+    
+    def initUI(self):
+        # Элементы управления
+        btn_select_dataset = QPushButton('Выбрать датасет')
+        btn_select_target_variable = QPushButton('Выбрать целевую переменную')
+        btn_build_correlation_graph = QPushButton('Построить график корреляции')
+        btn_remove_target_variable = QPushButton('Удалить признак')
+        btn_save_processed_data = QPushButton('Сохранить датасет')
+        self.label_dataset_status = QLabel('')
+        self.combo_box_columns = QComboBox()
+        self.class_distribution_label = QLabel('')
+        self.info_label = QLabel('''
+Коэффициент корреляции близок к нулю: признак практически не зависит от другого параметра.<br/>
+Высокий коэффициент (+0.8 и выше): два признака сильно взаимосвязаны, возможно, один из них избыточен.<br/>
+Отрицательные коэффициенты (-0.8 и ниже): признаки движутся противоположно друг другу.
+''')
+        
+        # Обработчики кнопок
+        btn_select_dataset.clicked.connect(self.selectDataset)
+        btn_select_target_variable.clicked.connect(self.selectTargetVariable)
+        btn_build_correlation_graph.clicked.connect(self.buildCorrelationGraph)
+        btn_remove_target_variable.clicked.connect(self.removeTargetVariable)
+        btn_save_processed_data.clicked.connect(self.saveProcessedData)
+        
+        # Макеты элементов
+        h_layout_buttons = QHBoxLayout()
+        h_layout_buttons.addWidget(btn_select_dataset)
+        h_layout_buttons.addWidget(btn_select_target_variable)
+        h_layout_buttons.addWidget(btn_build_correlation_graph)
+        h_layout_buttons.addWidget(btn_remove_target_variable)
+        
+        v_layout_main = QVBoxLayout()
+        v_layout_main.addLayout(h_layout_buttons)
+        v_layout_main.addWidget(self.label_dataset_status)
+        v_layout_main.addWidget(self.combo_box_columns)
+        v_layout_main.addWidget(self.class_distribution_label)
+        v_layout_main.addWidget(self.info_label)
+        v_layout_main.addWidget(btn_save_processed_data)
+        
+        self.setLayout(v_layout_main)
+    
+    def selectDataset(self):
+        # Получаем абсолютный путь к текущему файлу (правильно используем __file__)
+        current_file_path = os.path.abspath(__file__)  # Обратите внимание на двойное подчеркивание!
+        
+        # Поднимаемся на уровень выше, чтобы выйти из src и попасть в корневую директорию проекта
+        project_root = os.path.dirname(os.path.dirname(current_file_path))
+        
+        # Формируем путь к папке processed_dataset
+        start_directory = os.path.join(project_root, 'processed_dataset')
+        
+        # Диалог открытия файла начинается с директории processed_dataset
+        file_name, _ = QFileDialog.getOpenFileName(
+            self,
+            'Открыть файл',
+            start_directory,  # Начало пути из папки processed_dataset
+            'CSV (*.csv);;Excel (*.xls *.xlsx)'
+        )
+        
+        if file_name:
+            try:
+                self.df = pd.read_csv(file_name) if '.csv' in file_name else pd.read_excel(file_name)
+                self.file_name = file_name  # запоминаем полное имя файла
+                self.label_dataset_status.setText(f'Загружено {len(self.df)} строк.')
+                self.combo_box_columns.clear()
+                self.combo_box_columns.addItems(list(self.df.columns))
+            except Exception as e:
+                print(e)
+                self.label_dataset_status.setText('Ошибка загрузки файла.')
+                
+    def selectTargetVariable(self):
+        target_column = self.combo_box_columns.currentText()
+        if target_column:
+            self.target_variable = target_column
+            class_counts = self.df[self.target_variable].value_counts()
+            distribution_text = f'\n{"-" * 30}\nРаспределение записей по категориям:\n' + \
+                               "\n".join([f"{cls}: {cnt}" for cls, cnt in class_counts.items()])
+            self.class_distribution_label.setText(distribution_text)
+            self.label_dataset_status.setText(f'Цель выбрана: {target_column}')
+    
+    def removeTargetVariable(self):
+        # Проверяем существование целевой переменной
+        if hasattr(self, 'target_variable'):
+            # Удаляем указанный признак из DataFrame
+            self.df.drop(columns=self.target_variable, inplace=True)
+            del self.target_variable
+            # Обновляем список признаков в комбобоксе
+            self.combo_box_columns.clear()
+            self.combo_box_columns.addItems(list(self.df.columns))
+            self.class_distribution_label.clear()
+            self.label_dataset_status.setText("Признак удалён.")
+        else:
+            self.label_dataset_status.setText("Ничего не выбрано для удаления.")
+    
+    def buildCorrelationGraph(self):
+        if hasattr(self, 'df'):
+            corr_matrix = self.df.corr()
+            # Открываем окно большего размера (900 x 900 пикселей)
+            plt.figure(figsize=(12, 9))
+            sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f")
+            plt.title('Матрица корреляций')
+            plt.show()
+        else:
+            self.label_dataset_status.setText('Сначала выберите датасет!')
+
+    def saveProcessedData(self):
+        if not hasattr(self, 'df'):
+            self.label_dataset_status.setText('Нет загруженного датасета для сохранения.')
+            return
+        
+        project_dir = os.path.dirname(os.path.abspath(__file__))
+        output_folder = os.path.join(project_dir, 'processed_dataset')
+        os.makedirs(output_folder, exist_ok=True)
+        
+        input_filename = self.file_name.split('/')[-1]
+        output_path = os.path.join(output_folder, input_filename)
+        
+        try:
+            self.df.to_csv(output_path, index=False)
+            self.label_dataset_status.setText(f'Датасет сохранён в {output_path}.')
+        except Exception as e:
+            print(e)
+            self.label_dataset_status.setText('Ошибка при сохранении файла.')
+
+if __name__ == '__main__':
+    app = QApplication([])
+    window = CorrelationGraphUI()
+    window.show()
+    app.exec()
