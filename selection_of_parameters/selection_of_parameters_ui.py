@@ -2,7 +2,7 @@ import sys
 from PySide6.QtWidgets import *
 from PySide6.QtGui import QIcon
 import ast
-from selection_of_parameters.selection_of_parameters_logic import save_hyperparameters
+from selection_of_parameters.selection_of_parameters_logic import save_hyperparameters, get_hyperparameters
 
 
 class HyperParameterOptimizerGUI(QWidget):
@@ -14,59 +14,61 @@ class HyperParameterOptimizerGUI(QWidget):
         # Основная структура окна
         main_layout = QVBoxLayout()
         self.setWindowTitle("Настройки гиперпараметров")
+        # Получаем текущие значения из логики
+        current_grid = get_hyperparameters()
         # Определение параметров и их пояснений
         hyperparameters = {
             'n_estimators': {
-                'value': '[50, 100, 200, 300, 500]',
+                'value': str(current_grid.get('n_estimators', [50, 100, 200, 300, 500])),
                 'tooltip': 'Количество деревьев в случайном лесе.'
                           '\nБольше деревьев повышает точность, но замедляет процесс обучения.',
             },
             'max_depth': {
-                'value': '[None, 10, 20, 30, 40, 60]',
+                'value': str(current_grid.get('max_depth', [None, 10, 20, 30, 40, 60])),
                 'tooltip': 'Максимальная глубина дерева.'
                           '\nЗначение None означает неограниченную глубину.',
             },
             'min_samples_split': {
-                'value': '[2, 5, 10, 15]',
+                'value': str(current_grid.get('min_samples_split', [2, 5, 10, 15])),
                 'tooltip': 'Минимальное количество примеров, необходимое для разделения узла.'
                           '\nПовышение этого значения снижает вероятность переобучения.',
             },
             'min_samples_leaf': {
-                'value': '[1, 2, 4, 8]',
+                'value': str(current_grid.get('min_samples_leaf', [1, 2, 4, 8])),
                 'tooltip': 'Минимальное количество примеров в листовом узле.'
                           '\nНизкое значение помогает избегать чрезмерного дробления.',
             },
             'bootstrap': {
-                'value': '[True, False]',
+                'value': str(current_grid.get('bootstrap', [True, False])),
                 'tooltip': 'Использование Bootstrapping при обучении каждого дерева.'
                           '\nTrue включает bootstrapping, False — использует весь датасет целиком.',
             },
             'criterion': {
-                'value': "['gini', 'entropy']",
+                'value': str(current_grid.get('criterion', ['gini', 'entropy'])),
                 'tooltip': 'Метод расчета критерия разделения узлов:'
                           '\n- gini: индекс Джини (для измерения неопределенности)'
                           '\n- entropy: энтропия (для минимизации нечистоты)',
             },
             'class_weight': {
-                'value': "['balanced', None]",
+                'value': str(current_grid.get('class_weight', ['balanced', None])),
                 'tooltip': 'Весовые коэффициенты классов:'
                           '\n- balanced: классы уравновешены, веса вычисляются автоматически'
                           '\n- None: классам присваиваются равные веса.',
             },
             'max_features': {
-                'value': "[None, 'sqrt', 'log2']",
+                'value': str(current_grid.get('max_features', [None, 'sqrt', 'log2'])),
                 'tooltip': 'Максимальное количество признаков для рассчета разделения узлов:'
                           '\n- None: используются все признаки'
                           '\n- sqrt: квадратный корень от общего количества признаков'
                           '\n- log2: логарифм от общего количества признаков',
             },
             'ccp_alpha': {
-                'value': '[0.0, 0.01, 0.1]',
+                'value': str(current_grid.get('ccp_alpha', [0.0, 0.01, 0.1])),
                 'tooltip': 'Коэффициент регуляризации Cost Complexity Pruning (CCP Alpha).'
                           '\nЗначения ближе к нулю приводят к менее строгой обрезке дерева.',
             },
             'verbose': {
-                'value': '[0]',
+                'value': str(current_grid.get('verbose', [0])),
                 'tooltip': 'Подробность логгирования процесса обучения:'
                           '\n- 0: ничего не выводить'
                           '\n- >0: уровень детальности вывода увеличивается пропорционально значению.',
