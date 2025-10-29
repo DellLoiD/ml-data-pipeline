@@ -6,15 +6,11 @@ from preprocessing.data_balancing.data_balancing_method_ui import DataBalancingA
 from researching_models.check_models_ui import ClassificationApp
 from selection_of_parameters.selection_parameters_main_menu_ui import MainWindow_selection_parameters
 
-# Глобальная ссылка на окно обработки датасета
+# Глобальная ссылка на окна
 processing_window_instance = None
-# Глобальная ссылка на окно 
 correlation_graph_instance = None
-# Глобальная ссылка на окно 
 data_balancing_smote_instance = None
-
 classification_app_instance  = None
-
 selection_of_parameters_instance = None
     
 class TrainingWindow(QWidget):

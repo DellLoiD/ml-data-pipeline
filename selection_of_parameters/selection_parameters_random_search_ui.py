@@ -3,18 +3,16 @@ from PySide6.QtWidgets import *
 from PySide6.QtGui import QIcon
 from .selection_of_parameters_logic import get_hyperparameters, save_hyperparameters, get_random_search_params, save_random_search_params
 
-
 class RandomSearchConfigGUI(QWidget):
     def __init__(self):
         super().__init__()
-        self.text_fields = {}  # Dictionary to store text field references
+        self.text_fields = {}
         self.initUI()
 
     def initUI(self):
         # Макет главного окна
         main_layout = QVBoxLayout()
         self.setWindowTitle("Конфигурация RandomizedSearchCV")
-
         # Конфигурационные параметры и их описания
         config_params = {
             'estimator': {
@@ -68,43 +66,33 @@ class RandomSearchConfigGUI(QWidget):
         for param_name, details in config_params.items():
             # Группа элементов для текущего параметра
             group_layout = QHBoxLayout()
-
             # Название параметра
             label = QLabel(param_name + ": ")
             group_layout.addWidget(label)
-
             # Поле ввода
             edit_field = QLineEdit(details['value'])
-            group_layout.addWidget(edit_field)
-            
+            group_layout.addWidget(edit_field)            
             # Store text field reference
             self.text_fields[param_name] = edit_field
-
             # Кнопка справки
             help_button = QPushButton()
             help_button.setFixedSize(24, 24)
             help_button.setIcon(QIcon.fromTheme("dialog-question"))
             help_button.clicked.connect(lambda _, tip=details['tooltip']: self.show_help_message(tip))
             group_layout.addWidget(help_button)
-
             # Добавляем группу в основной макет
             main_layout.addLayout(group_layout)
-
         # Add Save Parameters button
         save_button = QPushButton('Save Parameters')
         save_button.clicked.connect(self.save_parameters)
         main_layout.addWidget(save_button)
-
         # Устанавливаем основной макет окна
-        self.setLayout(main_layout)
-        
+        self.setLayout(main_layout)        
         # Load current parameters into fields
         self.load_current_parameters()
 
     def show_help_message(self, message):
-        """
-        Отображение окна с подсказкой по выбранному параметру.
-        """
+        """Отображение окна с подсказкой по выбранному параметру."""
         QMessageBox.information(self, "Справка", message)
     
     def load_current_parameters(self):
