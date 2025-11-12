@@ -3,7 +3,6 @@ import joblib
 import pandas as pd
 from PySide6.QtWidgets import QVBoxLayout, QComboBox, QPushButton, QLabel, QMessageBox
 import sys
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLineEdit, QDialog
 )
