@@ -67,7 +67,7 @@ class CorrelationGraphUI(QWidget):
         project_root = os.path.dirname(os.path.dirname(current_file_path))
         
         # Формируем путь к папке processed_dataset
-        start_directory = os.path.join(project_root, 'processed_dataset')
+        start_directory = os.path.join(project_root, 'dataset')
         
         # Диалог открытия файла начинается с директории processed_dataset
         file_name, _ = QFileDialog.getOpenFileName(
@@ -92,9 +92,21 @@ class CorrelationGraphUI(QWidget):
         target_column = self.combo_box_columns.currentText()
         if target_column:
             self.target_variable = target_column
-            class_counts = self.df[self.target_variable].value_counts()
-            distribution_text = f'\n{"-" * 30}\nРаспределение записей по категориям:\n' + \
-                               "\n".join([f"{cls}: {cnt}" for cls, cnt in class_counts.items()])
+            class_counts = self.df[self.target_variable].value_counts().sort_values(ascending=False)
+            
+            # Ограничиваем количество отображаемых классов до первых 15-ти
+            top_classes = class_counts.head(15)
+            
+            # Формируем строку распределения классов
+            distribution_text = f'\n{"-" * 30}\nРаспределение записей по категориям:\n'
+            distribution_text += "\n".join([f"{cls}: {cnt}" for cls, cnt in top_classes.items()])
+            
+            # Если всего классов больше 15, добавляем сообщение о наличии остальных классов
+            total_classes_count = len(class_counts)
+            if total_classes_count > 15:
+                remaining_classes_count = total_classes_count - 15
+                distribution_text += f"\n... и ещё {remaining_classes_count} категорий."
+                
             self.class_distribution_label.setText(distribution_text)
             self.label_dataset_status.setText(f'Цель выбрана: {target_column}')
     
@@ -128,16 +140,18 @@ class CorrelationGraphUI(QWidget):
             self.label_dataset_status.setText('Нет загруженного датасета для сохранения.')
             return
         
-        project_dir = os.path.dirname(os.path.abspath(__file__))
-        output_folder = os.path.join(project_dir, 'processed_dataset')
+        # Получаем путь к проекту относительно текущего скрипта
+        project_dir = os.getcwd()  # Используем текущую рабочую директорию
+        output_folder = os.path.join(project_dir, 'dataset')
         os.makedirs(output_folder, exist_ok=True)
         
-        input_filename = self.file_name.split('/')[-1]
+        # Определяем имя выходного файла
+        input_filename = os.path.basename(self.file_name)
         output_path = os.path.join(output_folder, input_filename)
         
         try:
             self.df.to_csv(output_path, index=False)
-            self.label_dataset_status.setText(f'Датасет сохранён в {output_path}.')
+            self.label_dataset_status.setText(f'Датасет успешно сохранён в {output_path}')
         except Exception as e:
             print(e)
             self.label_dataset_status.setText('Ошибка при сохранении файла.')

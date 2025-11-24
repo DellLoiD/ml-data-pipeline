@@ -1,187 +1,195 @@
-import sys
-from PySide6.QtWidgets import *
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QPushButton, QMessageBox, QFrame
+)
 from PySide6.QtGui import QIcon
-from .selection_of_parameters_logic import get_hyperparameters, save_hyperparameters, get_random_search_params, save_random_search_params
+from PySide6.QtWidgets import QStyle
+import ast
+import sys
+
+# Импорты логики
+from .selection_of_parameters_logic import (
+    get_random_search_params,
+    save_random_search_params
+)
+
 
 class RandomSearchConfigGUI(QWidget):
     def __init__(self):
         super().__init__()
         self.text_fields = {}
+        self.param_info = self.get_param_info()  # Кэшируем
         self.initUI()
 
     def initUI(self):
-        # Макет главного окна
         main_layout = QVBoxLayout()
         self.setWindowTitle("Конфигурация RandomizedSearchCV")
-        # Конфигурационные параметры и их описания
-        config_params = {
-            'estimator': {
-                'value': 'RandomForestClassifier(random_state=42)',
-                'tooltip': 'Базовый классификатор, используемый для подбора параметров.'
-                           '\nЗдесь указан RandomForestClassifier с фиксированным seed для воспроизводимости результатов.',
-            },
-            'param_distributions': {
-                'value': 'random_grid',
-                'tooltip': 'Диапазоны возможных значений гиперпараметров.'
-                           '\nЭто сетка, определяющая возможные комбинации гиперпараметров для перебора.',
-            },
+        self.setWindowIcon(QIcon.fromTheme("configure"))
+
+        # === Описание ===
+        desc = QLabel("Настройки поиска гиперпараметров (RandomizedSearchCV)")
+        desc.setStyleSheet("font-size: 14px; font-weight: bold; margin-bottom: 10px;")
+        main_layout.addWidget(desc)
+
+        # Разделитель
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setFrameShadow(QFrame.Sunken)
+        main_layout.addWidget(line)
+
+        # === Поля параметров ===
+        self.fields_layout = QVBoxLayout()
+        self.load_search_params()
+        main_layout.addLayout(self.fields_layout)
+
+        # === Кнопка сохранения ===
+        save_button = QPushButton("Сохранить параметры")
+        save_button.clicked.connect(self.on_save_clicked)
+        save_button.setStyleSheet("font-size: 12px; padding: 10px;")
+        main_layout.addWidget(save_button)
+
+        # Устанавливаем макет
+        self.setLayout(main_layout)
+        self.resize(600, 400)
+
+    def clear_layout(self, layout):
+        """Безопасная очистка QVBoxLayout"""
+        if layout is not None:
+            while layout.count():
+                item = layout.takeAt(0)
+                widget = item.widget()
+                if widget is not None:
+                    widget.setParent(None)
+                else:
+                    child_layout = item.layout()
+                    if child_layout is not None:
+                        self.clear_layout(child_layout)
+
+    def get_param_info(self):
+        """Описание параметров RandomizedSearchCV с подсказками и значениями по умолчанию"""
+        return {
             'n_iter': {
-                'value': '100',
-                'tooltip': 'Количество итераций поиска лучших параметров.'
-                           '\nБольшее значение обеспечивает лучшее покрытие пространства гиперпараметров, но требует больше вычислительных ресурсов.',
+                "default": 100,
+                "tooltip": "Количество итераций случайного поиска.\n"
+                           "Больше — точнее, но дольше."
             },
             'cv': {
-                'value': '6',
-                'tooltip': 'Количество фолдов для кросс-валидации.'
-                           '\nПозволяет оценить стабильность модели и уменьшить смещение оценки производительности.',
+                "default": 5,
+                "tooltip": "Количество фолдов кросс-валидации.\n"
+                           "Обычно 3–10. Чем больше — надёжнее оценка, но медленнее."
             },
             'scoring': {
-                'value': "['accuracy', 'f1_macro']",
-                'tooltip': 'Метрики, используемые для оценки моделей.'
-                           '\nНесколько показателей позволяют выбрать лучшую комбинацию параметров на основе компромисса между точностью и полнотой.',
+                "default": ['accuracy'],
+                "tooltip": "Метрики для оценки моделей.\n"
+                           "Можно указать несколько: ['accuracy', 'f1_macro']"
             },
             'refit': {
-                'value': "'accuracy'",
-                'tooltip': 'Выбор лучшей модели производится по указанной метрике.'
-                           '\nAccuracy наиболее распространенная мера точности классификации.',
+                "default": 'accuracy',
+                "tooltip": "Метрика, по которой выбирается лучшая модель.\n"
+                           "Должна быть одной из 'scoring'."
+            },
+            'test_size': {
+                "default": 0.2,
+                "tooltip": "Доля данных, выделенных на тестовую выборку.\n"
+                           "Обычно: 0.2 (20%)"
             },
             'random_state': {
-                'value': '42',
-                'tooltip': 'Фиксированное начальное состояние генератора случайных чисел.'
-                           '\nУстанавливает воспроизведение эксперимента при разных запусках.',
+                "default": 42,
+                "tooltip": "Seed для воспроизводимости результатов."
             },
             'verbose': {
-                'value': '2',
-                'tooltip': 'Уровень детализации печати прогресса.'
-                           '\nЧем выше значение, тем подробнее информация о ходе процесса подбора параметров.',
+                "default": 1,
+                "tooltip": "Уровень детализации вывода:\n"
+                           "0 — тихо, 1 — информация по итерациям, 2 — подробно."
             },
             'n_jobs': {
-                'value': '-1',
-                'tooltip': 'Количество ядер CPU, используемых для параллельных вычислений.'
-                           '\n-1 означает задействование всех доступных ядер.',
-            },
+                "default": -1,
+                "tooltip": "Количество ядер CPU.\n"
+                           "-1 = все доступные ядра."
+            }
         }
 
-        # Генерируем элементы графического интерфейса
-        for param_name, details in config_params.items():
-            # Группа элементов для текущего параметра
-            group_layout = QHBoxLayout()
-            # Название параметра
-            label = QLabel(param_name + ": ")
-            group_layout.addWidget(label)
-            # Поле ввода
-            edit_field = QLineEdit(details['value'])
-            group_layout.addWidget(edit_field)            
-            # Store text field reference
-            self.text_fields[param_name] = edit_field
-            # Кнопка справки
-            help_button = QPushButton()
-            help_button.setFixedSize(24, 24)
-            help_button.setIcon(QIcon.fromTheme("dialog-question"))
-            help_button.clicked.connect(lambda _, tip=details['tooltip']: self.show_help_message(tip))
-            group_layout.addWidget(help_button)
-            # Добавляем группу в основной макет
-            main_layout.addLayout(group_layout)
-        # Add Save Parameters button
-        save_button = QPushButton('Save Parameters')
-        save_button.clicked.connect(self.save_parameters)
-        main_layout.addWidget(save_button)
-        # Устанавливаем основной макет окна
-        self.setLayout(main_layout)        
-        # Load current parameters into fields
-        self.load_current_parameters()
+    def load_search_params(self):
+        """Загружает текущие параметры и создаёт поля ввода"""
+        self.clear_layout(self.fields_layout)
+        self.text_fields.clear()
 
-    def show_help_message(self, message):
-        """Отображение окна с подсказкой по выбранному параметру."""
-        QMessageBox.information(self, "Справка", message)
-    
-    def load_current_parameters(self):
-        """
-        Load current parameters from the logic file into the text fields.
-        """
+        current_params = get_random_search_params()
+
+        for param_name, info in self.param_info.items():
+            current_value = current_params.get(param_name, info["default"])
+
+            row = QHBoxLayout()
+            label = QLabel(f"{param_name}:")
+            row.addWidget(label)
+
+            edit = QLineEdit(self.format_value(current_value))
+            edit.setToolTip(str(current_value))
+            row.addWidget(edit)
+            self.text_fields[param_name] = edit
+
+            btn = QPushButton()
+            btn.setFixedSize(24, 24)
+            btn.setIcon(QIcon.fromTheme("dialog-question", self.style().standardIcon(QStyle.SP_MessageBoxQuestion)))
+            btn.clicked.connect(lambda _, tip=info["tooltip"]: self.show_help(tip))
+            row.addWidget(btn)
+
+            self.fields_layout.addLayout(row)
+
+    def format_value(self, value):
+        """Форматирует значение для отображения в QLineEdit"""
+        if isinstance(value, (list, tuple)):
+            return str(value)
+        elif isinstance(value, str):
+            return f"'{value}'"
+        else:
+            return str(value)
+
+    def show_help(self, message):
+        """Показывает подсказку в виде QMessageBox"""
+        QMessageBox.information(self, "Справка: Параметр RandomizedSearchCV", message)
+
+    def parse_value(self, param_name, text):
+        """Безопасно парсит значение из строки"""
+        text = text.strip()
+        default_value = self.param_info[param_name]["default"]
+
         try:
-            # Get current hyperparameters from the logic file
-            current_hyperparams = get_hyperparameters()
-            current_search_params = get_random_search_params()
-            
-            # Update param_distributions field with current random_grid
-            if 'param_distributions' in self.text_fields:
-                self.text_fields['param_distributions'].setText(str(current_hyperparams))
-            
-            # Update other RandomizedSearchCV parameters
-            for param_name, text_field in self.text_fields.items():
-                if param_name in current_search_params and param_name != 'param_distributions':
-                    text_field.setText(str(current_search_params[param_name]))
-                
-        except Exception as e:
-            QMessageBox.warning(self, "Warning", f"Could not load current parameters: {str(e)}")
-    
-    def save_parameters(self):
-        """
-        Save the parameters from text fields to the logic file.
-        """
+            if isinstance(default_value, int):
+                return int(text)
+            elif isinstance(default_value, float):
+                return float(text)
+            elif isinstance(default_value, list):
+                # Безопасный разбор списка
+                if text.startswith('[') and text.endswith(']'):
+                    return ast.literal_eval(text)
+                else:
+                    # Попробуем как строку
+                    return text
+            elif isinstance(default_value, str):
+                if text.startswith("'") and text.endswith("'"):
+                    return text[1:-1]
+                return text
+            else:
+                return ast.literal_eval(text)
+        except Exception:
+            return default_value  # Возвращаем значение по умолчанию при ошибке
+
+    def on_save_clicked(self):
+        """Обработчик кнопки 'Сохранить'"""
         try:
-            # Get values from text fields
-            param_values = {}
-            for param_name, text_field in self.text_fields.items():
-                param_values[param_name] = text_field.text()
-            
-            # Special handling for param_distributions - it should be a dict
-            if 'param_distributions' in param_values:
-                try:
-                    # Try to evaluate the string as a dictionary
-                    param_dict = eval(param_values['param_distributions'])
-                    if isinstance(param_dict, dict):
-                        save_hyperparameters(param_dict)
-                    else:
-                        QMessageBox.warning(self, "Error", "param_distributions must be a valid dictionary")
-                        return
-                except Exception as e:
-                    QMessageBox.warning(self, "Error", f"Invalid dictionary format for param_distributions: {str(e)}")
-                    return
-            
-            # Save RandomizedSearchCV parameters (excluding param_distributions)
-            search_params = {}
-            for param_name, value in param_values.items():
-                if param_name != 'param_distributions':
-                    # Try to convert string values to appropriate types
-                    try:
-                        # Handle numeric values
-                        if value.isdigit() or (value.startswith('-') and value[1:].isdigit()):
-                            search_params[param_name] = int(value)
-                        elif value.replace('.', '').replace('-', '').isdigit():
-                            search_params[param_name] = float(value)
-                        # Handle list-like strings
-                        elif value.startswith('[') and value.endswith(']'):
-                            search_params[param_name] = eval(value)
-                        # Handle quoted strings
-                        elif value.startswith("'") and value.endswith("'"):
-                            search_params[param_name] = eval(value)
-                        else:
-                            search_params[param_name] = value
-                    except:
-                        search_params[param_name] = value
-            
-            save_random_search_params(search_params)
-            
-            # Store parameters for later use
-            self.saved_params = param_values
-            
-            QMessageBox.information(self, "Success", "Parameters saved successfully!")
-            
+            updated_params = {}
+            for param_name in self.param_info:
+                text = self.text_fields[param_name].text()
+                value = self.parse_value(param_name, text)
+                updated_params[param_name] = value
+
+            # Сохраняем
+            save_random_search_params(updated_params)
+            QMessageBox.information(self, "Успех", "Параметры RandomizedSearchCV успешно сохранены!")
+
+            # Перезагружаем, чтобы убедиться
+            self.load_search_params()
+
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save parameters: {str(e)}")
-    
-    def get_saved_parameters(self):
-        """
-        Return the saved parameters for use by the logic file.
-        """
-        return getattr(self, 'saved_params', {})
-
-
-# Запуск приложения
-if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    gui = RandomSearchConfigGUI()
-    gui.show()
-    sys.exit(app.exec())
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить параметры:\n{str(e)}")

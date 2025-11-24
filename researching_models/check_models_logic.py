@@ -2,7 +2,7 @@ from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 import seaborn as sns
 import matplotlib.pyplot as plt
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 import pandas as pd
 import numpy as np
 import os
@@ -63,20 +63,25 @@ class DataModelHandler:
         if self.df is None or self.df.empty:
             print("Датасет не загружен!")
             return
+        
         # Открываем экран загрузки
         splash_screen = LoadingScreen()
-        QApplication.instance().processEvents()        
+        QApplication.instance().processEvents()
+        
         # Получаем выбранную целевую переменную
         target_col = self.parent.target_var_combobox.currentText()
         feature_cols = list(self.df.columns.drop(target_col))
         X = self.df[feature_cols]
         y = self.df[target_col]
+        
         # Проверяем, какие модели активированы пользователями
         selected_models = []
         for checkbox in self.checkboxes:
-            if not checkbox.isChecked(): continue 
+            if not checkbox.isChecked():
+                continue
             model_name = checkbox.text()
-            model_params = self.labels_and_lines.get(model_name, {})             
+            model_params = self.labels_and_lines.get(model_name, {})
+            
             # Определяем параметры каждой модели
             if model_name == 'Random Forest':
                 n_estimators = int(model_params['Количество деревьев'].text()) if 'Количество деревьев' in model_params else 100
@@ -84,21 +89,23 @@ class DataModelHandler:
                 random_state = int(model_params['Random State'].text()) if 'Random State' in model_params else 42
                 clf = RandomForestClassifier(n_estimators=n_estimators, random_state=random_state)
                 selected_models.append((model_name, clf, test_size, random_state))
+                
             elif model_name == 'Gradient Boosting':
                 n_estimators = int(model_params['Количество деревьев'].text()) if 'Количество деревьев' in model_params else 100
                 test_size = float(model_params['Test Size'].text()) if 'Test Size' in model_params else 0.2
                 random_state = int(model_params['Random State'].text()) if 'Random State' in model_params else 42
                 clf = GradientBoostingClassifier(n_estimators=n_estimators, random_state=random_state)
                 selected_models.append((model_name, clf, test_size, random_state))
+                
             elif model_name == 'Logistic Regression':
                 C = float(model_params['C'].text()) if 'C' in model_params else 1.0
                 max_iter = int(model_params['Max Iterations'].text()) if 'Max Iterations' in model_params else 100
                 penalty = str(model_params['Penalty'].text()) if 'Penalty' in model_params else 'l2'
                 clf = LogisticRegression(C=C, max_iter=max_iter, penalty=penalty)
-                selected_models.append((model_name, clf))        
+                selected_models.append((model_name, clf))
+        
         # Начинаем оценивать выбранные модели
-        accuracies = []
-        times = []
+        results = []  # Список кортежей (название модели, точность, F1-score, ROC-AUC, время вычисления)
         for entry in selected_models:
             if len(entry) == 4:
                 model_name, clf, test_size, random_state = entry
@@ -106,24 +113,42 @@ class DataModelHandler:
                 model_name, clf = entry
                 test_size = 0.2
                 random_state = 42
-            # Единая логика для всех моделей
+            
+            # Логика оценки моделей
             start_time = datetime.now()
             X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=random_state)
             clf.fit(X_train, y_train)
             y_pred = clf.predict(X_test)
+            probas = clf.predict_proba(X_test)[:, 1]  # Вероятности положительного класса
             end_time = datetime.now()
             elapsed_time = (end_time - start_time).total_seconds()
+            
+            # Вычисление метрик
             acc = accuracy_score(y_test, y_pred)
-            accuracies.append((model_name, acc))
-            times.append(elapsed_time)        
-        # Формируем отчёт
-        accuracy_text = "\n".join([f"{name}: Точность={acc:.4f}" for name, acc in accuracies])
-        total_time = sum(times)
-        time_text = f"Время выполнения: {total_time:.4f} секунд"        
+            f1 = f1_score(y_test, y_pred)
+            try:
+                auc = roc_auc_score(y_test, probas)
+            except ValueError as e:
+                auc = "Ошибка при расчете AUC"
+            
+            # Добавляем результаты
+            results.append((model_name, acc, f1, auc, elapsed_time))
+        
+        # Формирование отчёта
+        report = ""
+        for result in results:
+            model_name, acc, f1, auc, _ = result
+            report += f"{model_name}:\nТочность={acc:.4f}, F1-Score={f1:.4f}, ROC-AUC={auc}\n\n"
+        
+        # Общая статистика по времени выполнения
+        total_time = sum(result[-1] for result in results)
+        time_text = f"Время выполнения: {total_time:.4f} секунд"
+        
         # Закрываем экран загрузки
-        splash_screen.close()        
+        splash_screen.close()
+        
         # Обновляем интерфейс результатами
-        self.accuracy_label.setText(accuracy_text)
+        self.accuracy_label.setText(report.strip())
         self.time_label.setText(time_text)
         
     def split_dataset(self):

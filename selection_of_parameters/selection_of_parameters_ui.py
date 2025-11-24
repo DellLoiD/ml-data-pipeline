@@ -1,135 +1,187 @@
-import sys
-from PySide6.QtWidgets import *
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QPushButton, QMessageBox, QComboBox
+)
 from PySide6.QtGui import QIcon
 import ast
-from selection_of_parameters.selection_of_parameters_logic import save_hyperparameters, get_hyperparameters
+from selection_of_parameters.selection_of_parameters_logic import save_random_grid, get_random_grid
 
 
 class HyperParameterOptimizerGUI(QWidget):
     def __init__(self):
         super().__init__()
+        self.model_type = "RandomForest"  # по умолчанию
         self.initUI()
 
     def initUI(self):
-        # Основная структура окна
         main_layout = QVBoxLayout()
-        self.setWindowTitle("Настройки гиперпараметров")
-        # Получаем текущие значения из логики
-        current_grid = get_hyperparameters()
-        # Определение параметров и их пояснений
-        hyperparameters = {
+        self.setWindowTitle("Настройка гиперпараметров")
+
+        # === Выбор модели ===
+        model_layout = QHBoxLayout()
+        model_layout.addWidget(QLabel("Модель:"))
+        self.model_combo = QComboBox()
+        self.model_combo.addItems(["RandomForest", "GradientBoosting", "LogisticRegression"])
+        self.model_combo.setCurrentText(self.model_type)
+        self.model_combo.currentTextChanged.connect(self.load_model_params)
+        model_layout.addWidget(self.model_combo)
+        main_layout.addLayout(model_layout)
+
+        # === Поля параметров ===
+        self.param_fields = {}
+        self.fields_layout = QVBoxLayout()
+        main_layout.addLayout(self.fields_layout)
+
+        # === Кнопка сохранения ===
+        save_button = QPushButton("Сохранить параметры")
+        save_button.clicked.connect(self.on_save_clicked)
+        main_layout.addWidget(save_button)
+
+        self.setLayout(main_layout)
+
+        # Загружаем параметры для начальной модели
+        self.load_model_params(self.model_type)
+        
+    def clear_layout(self, layout):
+        if layout is not None:
+            while layout.count():
+                item = layout.takeAt(0)
+                widget = item.widget()
+                if widget is not None:
+                    widget.setParent(None)
+                else:
+                    # Если это вложенный макет или спейсер — рекурсивно очищаем
+                    child_layout = item.layout()
+                    if child_layout is not None:
+                        self.clear_layout(child_layout)
+
+    def load_model_params(self, model_type):
+        self.model_type = model_type
+        # Очищаем макет с помощью безопасной функции
+        self.clear_layout(self.fields_layout)
+        self.param_fields.clear()
+
+        # Получаем параметры ТОЛЬКО для выбранной модели
+        full_grid = get_random_grid()
+        model_params = full_grid.get(model_type, {})
+
+        # Определяем, какие параметры доступны для каждой модели
+        param_info = self.get_param_info()
+
+        for param_name, info in param_info.items():
+            if param_name not in model_params and model_type != "RandomForest":
+                continue  # например, max_features нет у LogisticRegression
+
+            # Группа для параметра
+            row = QHBoxLayout()
+            label = QLabel(f"{param_name}:")
+            row.addWidget(label)
+
+            # Текущее значение
+            current_value = model_params.get(param_name, info["default"])
+            edit = QLineEdit(str(current_value))
+            row.addWidget(edit)
+            self.param_fields[param_name] = edit
+
+            # Кнопка справки
+            btn = QPushButton()
+            btn.setFixedSize(24, 24)
+            btn.setIcon(QIcon.fromTheme("dialog-question"))
+            btn.clicked.connect(lambda _, tip=info["tooltip"]: self.show_help(tip))
+            row.addWidget(btn)
+
+            self.fields_layout.addLayout(row)
+
+    def get_param_info(self):
+        return {
             'n_estimators': {
-                'value': str(current_grid.get('n_estimators', [50, 100, 200, 300, 500])),
-                'tooltip': 'Количество деревьев в случайном лесе.'
-                          '\nБольше деревьев повышает точность, но замедляет процесс обучения.',
+                "default": [100],
+                "tooltip": "Количество деревьев в лесу."
             },
             'max_depth': {
-                'value': str(current_grid.get('max_depth', [None, 10, 20, 30, 40, 60])),
-                'tooltip': 'Максимальная глубина дерева.'
-                          '\nЗначение None означает неограниченную глубину.',
+                "default": [None, 10, 20],
+                "tooltip": "Макс. глубина дерева. None — неограничена."
             },
             'min_samples_split': {
-                'value': str(current_grid.get('min_samples_split', [2, 5, 10, 15])),
-                'tooltip': 'Минимальное количество примеров, необходимое для разделения узла.'
-                          '\nПовышение этого значения снижает вероятность переобучения.',
+                "default": [2, 5],
+                "tooltip": "Мин. кол-во объектов для разделения узла."
             },
             'min_samples_leaf': {
-                'value': str(current_grid.get('min_samples_leaf', [1, 2, 4, 8])),
-                'tooltip': 'Минимальное количество примеров в листовом узле.'
-                          '\nНизкое значение помогает избегать чрезмерного дробления.',
+                "default": [1, 2],
+                "tooltip": "Мин. кол-во объектов в листе."
             },
             'bootstrap': {
-                'value': str(current_grid.get('bootstrap', [True, False])),
-                'tooltip': 'Использование Bootstrapping при обучении каждого дерева.'
-                          '\nTrue включает bootstrapping, False — использует весь датасет целиком.',
+                "default": [True, False],
+                "tooltip": "Использовать bootstrapping?"
             },
             'criterion': {
-                'value': str(current_grid.get('criterion', ['gini', 'entropy'])),
-                'tooltip': 'Метод расчета критерия разделения узлов:'
-                          '\n- gini: индекс Джини (для измерения неопределенности)'
-                          '\n- entropy: энтропия (для минимизации нечистоты)',
+                "default": ['gini', 'entropy'],
+                "tooltip": "Функция качества разделения."
             },
             'class_weight': {
-                'value': str(current_grid.get('class_weight', ['balanced', None])),
-                'tooltip': 'Весовые коэффициенты классов:'
-                          '\n- balanced: классы уравновешены, веса вычисляются автоматически'
-                          '\n- None: классам присваиваются равные веса.',
+                "default": ['balanced', None],
+                "tooltip": "Веса классов: balanced — автоматически."
             },
             'max_features': {
-                'value': str(current_grid.get('max_features', [None, 'sqrt', 'log2'])),
-                'tooltip': 'Максимальное количество признаков для рассчета разделения узлов:'
-                          '\n- None: используются все признаки'
-                          '\n- sqrt: квадратный корень от общего количества признаков'
-                          '\n- log2: логарифм от общего количества признаков',
+                "default": [None, 'sqrt', 'log2'],
+                "tooltip": "Число признаков для выбора лучшего разделения."
             },
             'ccp_alpha': {
-                'value': str(current_grid.get('ccp_alpha', [0.0, 0.01, 0.1])),
-                'tooltip': 'Коэффициент регуляризации Cost Complexity Pruning (CCP Alpha).'
-                          '\nЗначения ближе к нулю приводят к менее строгой обрезке дерева.',
+                "default": [0.0],
+                "tooltip": "Коэффициент регуляризации (обрезка дерева)."
             },
             'verbose': {
-                'value': str(current_grid.get('verbose', [0])),
-                'tooltip': 'Подробность логгирования процесса обучения:'
-                          '\n- 0: ничего не выводить'
-                          '\n- >0: уровень детальности вывода увеличивается пропорционально значению.',
+                "default": [0],
+                "tooltip": "Уровень подробности вывода (0 — нет)."
+            },
+            'learning_rate': {
+                "default": [0.1],
+                "tooltip": "Скорость обучения для Gradient Boosting."
+            },
+            'subsample': {
+                "default": [1.0],
+                "tooltip": "Доля данных, используемых для построения дерева."
+            },
+            'penalty': {
+                "default": ['l2'],
+                "tooltip": "Тип регуляризации: l1 (Lasso), l2 (Ridge)."
+            },
+            'C': {
+                "default": [1.0],
+                "tooltip": "Обратная сила регуляризации. Меньше — сильнее штраф."
+            },
+            'solver': {
+                "default": ['liblinear'],
+                "tooltip": "Алгоритм оптимизации."
             },
         }
 
-        # Динамическая генерация элементов
-        self.param_fields = {}
-        for param_name, details in hyperparameters.items():
-            # Группа элементов для каждого параметра
-            group_layout = QHBoxLayout()
-
-            # Имя параметра
-            label = QLabel(param_name + ": ")
-            group_layout.addWidget(label)
-
-            # Поле ввода
-            edit_field = QLineEdit(details['value'])
-            group_layout.addWidget(edit_field)
-            # Сохраняем ссылку на поле, чтобы позже прочитать значение
-            self.param_fields[param_name] = edit_field
-
-            # Кнопка справки
-            help_button = QPushButton()
-            help_button.setFixedSize(24, 24)
-            help_button.setIcon(QIcon.fromTheme("dialog-question"))
-            help_button.clicked.connect(lambda _, tip=details['tooltip']: self.show_help_message(tip))
-            group_layout.addWidget(help_button)
-
-            # Добавляем группу в основной макет
-            main_layout.addLayout(group_layout)
-        
-        # Кнопка "Сохранить параметры"
-        save_button = QPushButton('Сохранить параметры')
-        save_button.clicked.connect(self.on_save_clicked)
-        main_layout.addWidget(save_button)
-        # Устанавливаем основной макет окна
-        self.setLayout(main_layout)       
-
-
-    def show_help_message(self, message):
+    def show_help(self, message):
         QMessageBox.information(self, "Справка", message)
-        
-    def update_random_grid(self):
-        random_grid = {}
-        for param_name, edit in self.param_fields.items():
-            raw = edit.text()
+
+    def update_model_grid(self):
+        full_grid = get_random_grid()  # текущий полный словарь
+        model_params = {}
+
+        for param, edit in self.param_fields.items():
+            raw = edit.text().strip()
             try:
-                random_grid[param_name] = ast.literal_eval(raw)
+                value = ast.literal_eval(raw)
             except Exception:
-                random_grid[param_name] = raw
-        return random_grid
+                try:
+                    value = eval(raw)  # fallback для range, loguniform — ОПАСНО, но локально допустимо
+                except:
+                    value = raw
+            model_params[param] = value
+
+        # Обновляем только нужную модель
+        full_grid[self.model_type] = model_params
+        return full_grid
 
     def on_save_clicked(self):
-        random_grid = self.update_random_grid()
-        save_hyperparameters(random_grid)
-        QMessageBox.information(self, "Параметры сохранены", str(random_grid))
-
-# Запуск приложения
-if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    gui = HyperParameterOptimizerGUI()
-    gui.show()
-    sys.exit(app.exec())
+        try:
+            updated_grid = self.update_model_grid()
+            save_random_grid(updated_grid)  # сохраняем весь словарь
+            QMessageBox.information(self, "Успех", f"Параметры модели {self.model_type} сохранены!")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить параметры:\n{str(e)}")

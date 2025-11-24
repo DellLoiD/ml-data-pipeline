@@ -76,21 +76,17 @@ class DatasetSelectionWindow(QWidget):
         try:
             df = pd.read_csv(filename)
             self.df = df  
-            self.dataset_path = filename  
-            
+            self.dataset_path = filename
             # Очищаем список колонок и добавляем новые
             self.target_variable_combo.clear()
             feature_cols = list(df.columns)
             for col in feature_cols:
                 self.target_variable_combo.addItem(col)
-                
             # Устанавливаем первую колонку по умолчанию
             first_column = feature_cols[0]
             self.update_class_distribution(first_column)
-            
             # Обновляем метку с названием датасета
             self.dataset_label.setText(f"Датасет: {filename}")
-            
             # Подключаем обработчик события для изменения целевой переменной
             self.target_variable_combo.currentTextChanged.connect(self.update_class_distribution)
         except Exception as e:
@@ -139,48 +135,38 @@ class DatasetSelectionWindow(QWidget):
             QMessageBox.critical(self, "Ошибка", f"Произошла ошибка при расчете распределения классов:\n{e}")
             
     def test_data_selection(self):
-        number_to_select = int(self.number_input_field.text())  # Количество записей для моделирования
-        selected_class = self.target_variable_combo.currentText()  # Выбор целевого атрибута
-        
+        number_to_select = int(self.number_input_field.text())
+        selected_class = self.target_variable_combo.currentText()        
         try:
             random_samples_per_class = {}
-            display_samples_per_class = {}  # Будем хранить тут данные для отображения (только по 3 записи на класс)
+            display_samples_per_class = {}
             unique_classes = self.df[selected_class].unique()
-            
-            # Ограничиваем количество классов для отображения (всего три первых класса)
             unique_classes_for_display = unique_classes[:3]
             
             # Для всех классов делаем две вещи:
             # 1. Отбираем нужное количество записей для моделирования (number_to_select)
             # 2. Дополнительно отбираем по три записи для отображения в интерфейсе
             for cls in unique_classes:
-                subset = self.df[self.df[selected_class] == cls]
-                
+                subset = self.df[self.df[selected_class] == cls]                
                 # Выбираем нужное количество записей для моделирования
                 model_sample = subset.sample(min(number_to_select, len(subset)))
-                random_samples_per_class[cls] = model_sample
-                
+                random_samples_per_class[cls] = model_sample                
                 # Только для первых трёх классов дополнительно берем по три записи для отображения
                 if cls in unique_classes_for_display:
                     display_subset = subset.sample(min(3, len(subset)))  # Берём максимум 3 записи
-                    display_samples_per_class[cls] = display_subset
-            
+                    display_samples_per_class[cls] = display_subset            
             # Готовим данные для моделирования (объединяем все отобранные записи)
             random_sample_model = pd.concat(list(random_samples_per_class.values()), ignore_index=True)
-            self.random_sample = random_sample_model  # Данные для подачи в модель
-
+            self.random_sample = random_sample_model
             # Подготавливаем данные для отображения (только первые три класса и по три записи на класс)
-            random_sample_display = pd.concat(list(display_samples_per_class.values()), ignore_index=True)
-            
+            random_sample_display = pd.concat(list(display_samples_per_class.values()), ignore_index=True)            
             # Форматируем текст для отображения в интерфейсе
             samples_text = ''
             for idx, row in random_sample_display.iterrows():
                 record_values = ', '.join([f'{col}: {val}' for col, val in zip(row.index, row)])
-                samples_text += f'\nЗапись №{idx+1}: {record_values}'
-            
+                samples_text += f'\nЗапись №{idx+1}: {record_values}'            
             # Выводим результат в интерфейс
-            self.random_samples_label.setText(samples_text)
-        
+            self.random_samples_label.setText(samples_text)        
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Произошла ошибка при отборе записей:\\n{e}")
             
@@ -226,7 +212,6 @@ class DatasetSelectionWindow(QWidget):
                 QMessageBox.warning(self, "Предупреждение", "Сначала нужно отобрать записи для теста.")
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка при выполнении теста:\n{e}")
-
         
     # Обновляем метод save_report
     def save_report(self):        
@@ -244,8 +229,7 @@ class DatasetSelectionWindow(QWidget):
         with open(full_report_path, 'w') as f:
             f.write(f'Модель: {os.path.basename(self.model_file)}\\n'
                 f'Датасет: {self.dataset_path}\\n'
-                f'Результат: {self.result_label.text()}')
-        
+                f'Результат: {self.result_label.text()}')        
         QMessageBox.information(self, "Успех", f"Отчёт сохранён в {full_report_path}")
         
 if __name__ == "__main__":

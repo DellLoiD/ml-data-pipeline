@@ -4,8 +4,9 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import (QApplication, QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, QLabel, QCheckBox, QMessageBox,  QInputDialog, )
+from PySide6.QtWidgets import (QApplication, QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, QLabel, QCheckBox, QMessageBox,  QInputDialog, QGroupBox)
 import preprocessing.data_balancing.data_balancing_list_method_logic as balancing_methods  
+from preprocessing.data_balancing.setting_window_of_methods_balansing.smote_dialog_window_ui import show_smote_parameter_dialog
 
 class BalancingMethodsWindow(QDialog):
     balancing_finished_signal = Signal(str)
@@ -54,8 +55,8 @@ class BalancingMethodsWindow(QDialog):
             'Bagging Classifier Ensemble Approach': balancing_methods.balance_classes_bagging_classifier
         }
         self.methods = {
-            'Original SMOTE': 'Классический SMOTE создает синтетические объекты между существующими объектами.',
-            'Random Undersampling': 'Редукция мажоритарного класса путем случайного удаления объектов.',
+            'Original SMOTE': 'Создает синтетические объекты между существующими объектами.',
+            'Random Undersampling': 'Уменьшение доминирующего класса путем случайного удаления объектов.',
             'Cluster Centroids Sampling': 'Выбор центров кластеров мажоритарного класса для уменьшения объема выборки.',
             'NearMiss Algorithms': 'Отбор ближайших соседей среди разных классов для оптимизации расстояния между ними.',
             'Random Oversampling': 'Дублирование миноритарных объектов для повышения их числа.',
@@ -65,24 +66,81 @@ class BalancingMethodsWindow(QDialog):
             'SMOTE-ENN Hybrid Method': 'Применение SMOTE вместе с edited nearest neighbor для очищения набора данных.',
             'Bagging Classifier Ensemble Approach': 'Совместное использование ансамбля классификаторов для минимизации влияния несбалансированности.'
         }
-        # Создание элементов интерфейса для каждого метода
-        for method_name in self.methods.keys():
-            hbox = QHBoxLayout()
-            
+        # Группы методов
+        ## Группа методов, увеличивающих количество образцов
+        over_sampling_group = QGroupBox("Методы, увеличивающие количество образцов")
+        over_sampling_layout = QVBoxLayout()
+        for method_name in ['Original SMOTE', 'Random Oversampling', 'ADASYN', 'Borderline-SMOTE']:
+            hbox = QHBoxLayout()    
             # Кнопка выбора метода
             button_method = QPushButton(method_name)
             button_method.setFixedSize(300, 30)
             button_method.clicked.connect(lambda checked=False, method=method_name: self.applyMethod(method))
-            hbox.addWidget(button_method)
-            
+            hbox.addWidget(button_method)    
             # Справочная кнопка для описания метода
             help_button = QPushButton('Справка')
             help_button.setFixedSize(80, 30)
             help_button.clicked.connect(lambda checked=False, method=method_name: self.show_help(method))
-            hbox.addWidget(help_button)
-            
-            methods_layout.addLayout(hbox)
-        
+            hbox.addWidget(help_button)    
+            over_sampling_layout.addLayout(hbox)
+        over_sampling_group.setLayout(over_sampling_layout)
+        methods_layout.addWidget(over_sampling_group)
+
+        ## Группа методов, уменьшающих количество образцов
+        under_sampling_group = QGroupBox("Методы, уменьшающие количество образцов")
+        under_sampling_layout = QVBoxLayout()
+        for method_name in ['Random Undersampling', 'Cluster Centroids Sampling', 'NearMiss Algorithms']:
+            hbox = QHBoxLayout()    
+            # Кнопка выбора метода
+            button_method = QPushButton(method_name)
+            button_method.setFixedSize(300, 30)
+            button_method.clicked.connect(lambda checked=False, method=method_name: self.applyMethod(method))
+            hbox.addWidget(button_method)    
+            # Справочная кнопка для описания метода
+            help_button = QPushButton('Справка')
+            help_button.setFixedSize(80, 30)
+            help_button.clicked.connect(lambda checked=False, method=method_name: self.show_help(method))
+            hbox.addWidget(help_button)    
+            under_sampling_layout.addLayout(hbox)
+        under_sampling_group.setLayout(under_sampling_layout)
+        methods_layout.addWidget(under_sampling_group)
+        #Гибридные методы
+        hybrid_group = QGroupBox("Гибридные методы")
+        hybrid_layout = QVBoxLayout()
+        for method_name in ['SMOTE-TOMEK Hybrid Method', 'SMOTE-ENN Hybrid Method']:
+            hbox = QHBoxLayout()    
+            # Кнопка выбора метода
+            button_method = QPushButton(method_name)
+            button_method.setFixedSize(300, 30)
+            button_method.clicked.connect(lambda checked=False, method=method_name: self.applyMethod(method))
+            hbox.addWidget(button_method)    
+            # Справочная кнопка для описания метода
+            help_button = QPushButton('Справка')
+            help_button.setFixedSize(80, 30)
+            help_button.clicked.connect(lambda checked=False, method=method_name: self.show_help(method))
+            hbox.addWidget(help_button)    
+            hybrid_layout.addLayout(hbox)
+        hybrid_group.setLayout(hybrid_layout)
+        methods_layout.addWidget(hybrid_group)
+        ## Дополнительные методы
+        additional_group = QGroupBox("Дополнительные методы")
+        additional_layout = QVBoxLayout()
+        for method_name in ['Bagging Classifier Ensemble Approach']:
+            hbox = QHBoxLayout()    
+            # Кнопка выбора метода
+            button_method = QPushButton(method_name)
+            button_method.setFixedSize(300, 30)
+            button_method.clicked.connect(lambda checked=False, method=method_name: self.applyMethod(method))
+            hbox.addWidget(button_method)    
+            # Справочная кнопка для описания метода
+            help_button = QPushButton('Справка')
+            help_button.setFixedSize(80, 30)
+            help_button.clicked.connect(lambda checked=False, method=method_name: self.show_help(method))
+            hbox.addWidget(help_button)    
+            additional_layout.addLayout(hbox)
+        additional_group.setLayout(additional_layout)
+        methods_layout.addWidget(additional_group)
+
         main_layout.addLayout(methods_layout)
         self.setLayout(main_layout)
         self.show()
@@ -104,12 +162,12 @@ class BalancingMethodsWindow(QDialog):
             self.dataset_filename = file_name
             
             # Выбираем только численные столбцы
-            numeric_columns = df.select_dtypes(include=['number']).columns.tolist()
+            numeric_columns = df.select_dtypes(include=['number', 'bool']).columns.tolist()
             
             # Диалог выбора целевой переменной
             item, ok = QInputDialog.getItem(
                 self, 
-                "Выбор целевой переменной",
+                "Выбор целевой переменной(number или bool)",
                 "Выберите целевую переменную:", 
                 numeric_columns,
                 editable=False
@@ -142,20 +200,34 @@ class BalancingMethodsWindow(QDialog):
         
         # Текущий код очищает лейбл "после балансировки", пока сам процесс балансировки не реализован
         self.after_label.clear()
-
+    
     def applyMethod(self, method_name):
         method_func = self.method_to_function_map.get(method_name)
         if method_func is None:
             print(f"МЕТОД '{method_name}' НЕ НАЙДЕН!")
             return
-        round_labels = self.round_labels_checkbox.isChecked()
-        balanced_X_train, balanced_y_train = method_func(self.X_train, self.y_train, round_labels=round_labels)
+        
+        # Проверяем, какой именно метод выбран
+        if method_name == 'Original SMOTE':
+            parameters = show_smote_parameter_dialog(self.parentWidget())
+            if not parameters:
+                return  # Пользователь закрыл диалог без изменения параметров
+                
+            # Передача полученных параметров в функцию balance_classes_smote
+            round_labels = self.round_labels_checkbox.isChecked()
+            balanced_X_train, balanced_y_train = method_func(self.X_train, self.y_train, round_labels=round_labels, **parameters)
+        
+        elif method_name == 'Random Undersampling':
+            pass  # Аналогично реализуем остальные методы
+        
+        # Продолжайте аналогичную проверку для остальных методов...
+        
         self.X_resampled = balanced_X_train
         self.y_resampled = balanced_y_train
         class_counts = dict(zip(*np.unique(balanced_y_train, return_counts=True)))
         counts_str = ', '.join([f"{cls}: {count}" for cls, count in sorted(class_counts.items())])
         self.after_label.setText(f"Распределение классов после балансировки:\n{counts_str}")
-
+        
     def save_dataset(self):
         if self.X_resampled is None or self.y_resampled is None:
             QMessageBox.warning(self, "Предупреждение", "Сначала выполните балансировку или обрезку.")

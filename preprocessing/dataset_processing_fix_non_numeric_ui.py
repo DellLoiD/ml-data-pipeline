@@ -125,14 +125,17 @@ class OneHotEncodingWindow(QWidget):
             QMessageBox.critical(self, "Ошибка", "Датасет не выбран!")
             return
         
-        non_numeric_columns = self.dataset_df.select_dtypes(exclude=["number"]).columns.tolist()
-        if len(non_numeric_columns) > 0:
-            rows_to_display = min(len(non_numeric_columns), 20)  # Ограничиваем число отображаемых колонок до 20
+        # Исключаем числовые и булевые столбцы
+        excluded_types = ["number", "bool"]
+        non_numeric_and_non_bool_columns = self.dataset_df.select_dtypes(exclude=excluded_types).columns.tolist()
+        
+        if len(non_numeric_and_non_bool_columns) > 0:
+            rows_to_display = min(len(non_numeric_and_non_bool_columns), 20)  # Ограничиваем число отображаемых колонок до 20
             self.table_widget.clearContents()
             self.table_widget.setRowCount(rows_to_display)
             
             row_idx = 0
-            for column in non_numeric_columns[:rows_to_display]:
+            for column in non_numeric_and_non_bool_columns[:rows_to_display]:
                 unique_values = self.dataset_df[column].unique()
                 value_string = ', '.join(map(str, unique_values))
                 
@@ -145,12 +148,12 @@ class OneHotEncodingWindow(QWidget):
                 
             # Заполняем выпадающий список колонок
             self.column_selector.clear()
-            self.column_selector.addItems(non_numeric_columns)
+            self.column_selector.addItems(non_numeric_and_non_bool_columns)
             
             # Приспосабливаем размер окна под новую высоту таблицы
             self.adjustSize()
         else:
-            QMessageBox.information(self, "Информация", "Нечисловых столбцов нет.")
+            QMessageBox.information(self, "Информация", "Нет столбцов, кроме числовых и булевых.")
     # Применение выбранного метода
     def apply_method(self, method_func):
         selected_column = self.column_selector.currentText()
@@ -170,23 +173,22 @@ class OneHotEncodingWindow(QWidget):
         return self.dataset_df.select_dtypes(exclude=['number']).columns.tolist()
            
     def process_one_hot_encoding(self, column_name=None):
-            non_numeric_columns = self.select_non_numeric_columns()
-            if column_name:
-                # Если указана конкретная колонка, работаем только с ней
-                one_hot_cols = [column_name]
-            elif len(non_numeric_columns) > 0:
-                # Иначе используем все категориальные колонки
-                one_hot_cols = non_numeric_columns
-            else:
-                QMessageBox.information(self, "Информация", "Нечисловых столбцов нет.")
-                return
-            
-            # Выполняем One-Hot-кодирование и конвертируем результирующие колонки в int
-            encoded_dataframe = pd.get_dummies(self.dataset_df, columns=one_hot_cols)
-            encoded_dataframe = encoded_dataframe.astype({col: 'int8' for col in encoded_dataframe.columns if col.endswith('_Female') or col.endswith('_Male')})
-            
-            self.dataset_df = encoded_dataframe
-            QMessageBox.information(self, "Преобразование", "One-Hot кодирование применено успешно!")
+        non_numeric_columns = self.select_non_numeric_columns()
+        if column_name:
+            # Если указана конкретная колонка, работаем только с ней
+            one_hot_cols = [column_name]
+        elif len(non_numeric_columns) > 0:
+            # Иначе используем все категориальные колонки
+            one_hot_cols = non_numeric_columns
+        else:
+            QMessageBox.information(self, "Информация", "Нечисловых столбцов нет.")
+            return
+        
+        # Выполняем One-Hot-кодирование
+        encoded_dataframe = pd.get_dummies(self.dataset_df, columns=one_hot_cols)
+        
+        self.dataset_df = encoded_dataframe
+        QMessageBox.information(self, "Преобразование", "One-Hot кодирование применено успешно!")
     # Метод Label Encoding
     def process_label_encoding(self, column_name=None):
             if self.dataset_df is None:
