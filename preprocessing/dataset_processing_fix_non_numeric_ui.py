@@ -59,11 +59,12 @@ class OneHotEncodingWindow(QWidget):
             ("Label Encoding", self.process_label_encoding),
             ("Target Encoding", self.process_target_encoding),
             ("Frequency Encoding", self.process_frequency_encoding),
-            ("Binary Encoding", self.process_binary_encoding)
+            ("Binary Encoding", self.process_binary_encoding),
+            ("Обработать как дату", self.process_date_column)  
         ]
 
         for name, func in method_buttons:
-            hbox = QHBoxLayout()  # Макет строки с двумя кнопками (метод + справка)
+            hbox = QHBoxLayout()
             button_method = QPushButton(name)
             button_help = QPushButton("Справка")
             button_method.clicked.connect(lambda checked=False, f=func: self.apply_method(f))
@@ -73,14 +74,47 @@ class OneHotEncodingWindow(QWidget):
             methods_layout.addLayout(hbox)
 
         top_panel.addLayout(methods_layout)
-        
-        main_layout.addLayout(top_panel)        
-        # Кнопка сохранения результата
-        save_button = QPushButton('Сохранить датасет')
+        main_layout.addLayout(top_panel)
+
+        # === КНОПКА: Удалить выбранную категорию ===
+        remove_button = QPushButton("🗑️ Удалить выбранную категорию")
+        remove_button.setStyleSheet("color: red; font-weight: bold;")
+        remove_button.clicked.connect(self.remove_selected_column)
+        main_layout.addWidget(remove_button)
+
+        # === КНОПКА: Сохранить датасет ===
+        save_button = QPushButton('💾 Сохранить датасет')
         save_button.clicked.connect(self.save_processed_dataset)
         main_layout.addWidget(save_button)
         
         self.setLayout(main_layout)
+        
+    def remove_selected_column(self):
+        """Удаляет выбранный столбец из датасета"""
+        column_name = self.column_selector.currentText()
+        if not column_name:
+            QMessageBox.warning(self, "Предупреждение", "Выберите столбец для удаления!")
+            return
+
+        if self.dataset_df is None:
+            QMessageBox.critical(self, "Ошибка", "Датасет не загружен!")
+            return
+
+        reply = QMessageBox.question(
+            self, "Подтверждение",
+            f"Вы действительно хотите удалить столбец '{column_name}'?"
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        try:
+            self.dataset_df.drop(columns=[column_name], inplace=True)
+            QMessageBox.information(self, "Готово", f"Столбец '{column_name}' удалён.")
+
+            # Обновляем отображение
+            self.display_unique_values()  # автоматически очистит комбобокс и таблицу
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось удалить столбец:\n{e}")
     # Окно помощи
     def show_help(self, method_name):
         help_text = {
@@ -88,7 +122,11 @@ class OneHotEncodingWindow(QWidget):
             "Label Encoding": "Кодирование категориальных переменных числовыми индексами.",
             "Target Encoding": "Замещение категорий средними значениями целевой переменной.",
             "Frequency Encoding": "Замена категорий частотностью встречаемости.",
-            "Binary Encoding": "Использование бинарного представления индекса категорий."
+            "Binary Encoding": "Использование бинарного представления индекса категорий.",
+            "Обработать как дату":("Преобразует столбец с датами (например, 4/02/2016) в числовые признаки:\n"
+                "• Год\n• Месяц\n• День\n• День недели\n• Номер недели\n• Квартал\n\n"
+                "Позволяет использовать временные паттерны в обучении модели."
+            )
         }
         QMessageBox.information(self, f"Справка: {method_name}", help_text.get(method_name, ""))
 
@@ -263,6 +301,93 @@ class OneHotEncodingWindow(QWidget):
         transformed_data = binary_encoder.fit_transform(self.dataset_df)
         self.dataset_df = transformed_data
         QMessageBox.information(self, "Преобразование", "Binary Encoding применён успешно!")
+        
+    def process_date_column(self, column_name=None):
+        if self.dataset_df is None:
+            QMessageBox.critical(self, "Ошибка", "Датасет не загружен!")
+            return
+
+        if not column_name:
+            column_name = self.column_selector.currentText()
+            if not column_name:
+                QMessageBox.warning(self, "Предупреждение", "Выберите столбец с датой!")
+                return
+
+        try:
+            series = self.dataset_df[column_name]
+
+            # 🟩 Используем несколько форматов, как в detect_date_columns
+            date_formats = [
+                '%m/%d/%Y',    # 4/02/2016
+                '%m/%d/%y',    # 4/02/16
+                '%d/%m/%Y',    # 02/04/2016
+                '%Y-%m-%d',    # 2016-04-02
+                '%d.%m.%Y',    # 02.04.2016
+                '%Y/%m/%d',
+            ]
+
+            # Пытаемся распарсить с помощью каждого формата
+            parsed_series = pd.Series([pd.NaT] * len(series), dtype='datetime64[ns]')
+            remaining = series.copy()
+
+            for fmt in date_formats:
+                # Убираем уже распознанные
+                not_parsed = parsed_series.isna()
+                if not not_parsed.any():
+                    break
+
+                temp = remaining[not_parsed]
+                if len(temp) == 0:
+                    continue
+
+                # Пытаемся распарсить оставшиеся с этим форматом
+                converted = pd.to_datetime(temp, format=fmt, errors='coerce')
+                # Обновляем только где получилось
+                parsed_series[not_parsed] = converted.where(
+                    converted.notna(),
+                    parsed_series[not_parsed]
+                )
+
+            # Если ни один формат не помог — попробуем auto-parse (fallback)
+            still_na = parsed_series.isna()
+            if still_na.any():
+                fallback = pd.to_datetime(remaining[still_na], errors='coerce')
+                parsed_series[still_na] = fallback
+
+            # Теперь parsed_series — результат
+            valid_count = parsed_series.notna().sum()
+            total_count = len(series)
+
+            if valid_count == 0:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось распознать ни одну дату в столбце '{column_name}'")
+                return
+
+            # 🟩 Извлекаем компоненты
+            self.dataset_df[f"{column_name}_year"] = parsed_series.dt.year.astype('Int64')
+            self.dataset_df[f"{column_name}_month"] = parsed_series.dt.month.astype('Int64')
+            self.dataset_df[f"{column_name}_day"] = parsed_series.dt.day.astype('Int64')
+            self.dataset_df[f"{column_name}_dayofweek"] = parsed_series.dt.dayofweek.astype('Int64')
+            self.dataset_df[f"{column_name}_week"] = parsed_series.dt.isocalendar().week.astype('Int64')
+            self.dataset_df[f"{column_name}_quarter"] = parsed_series.dt.quarter.astype('Int64')
+
+            # Отчёт
+            reply = QMessageBox.question(
+                self, "Удалить исходный столбец?",
+                f"Распознано: {valid_count}/{total_count} валидных дат.\nУдалить столбец '{column_name}'?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply == QMessageBox.Yes:
+                self.dataset_df.drop(columns=[column_name], inplace=True)
+
+            QMessageBox.information(
+                self, "Успех",
+                f"Дата успешно обработана!\n"
+                f"Созданы признаки: год, месяц, день, день недели, неделя, квартал."
+            )
+            self.display_unique_values()
+
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Ошибка при обработке даты:\n{str(e)}")
 
 
 if __name__ == "__main__":

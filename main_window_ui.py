@@ -7,6 +7,9 @@ from preprocessing.data_balancing.data_balancing_method_ui import DataBalancingA
 from researching_models.check_models_ui import ClassificationApp
 from selection_of_parameters.selection_parameters_main_menu_ui import MainWindow_selection_parameters
 from inference_models.inference_trained_models import SurveyForm
+from load_dataset_ui import LoadDatasetWindow
+from splitting_dataset_ui import SplittingDatasetWindow
+from checking_data_formats_ui import CheckingDataFormatsWindow
 
 # Глобальная ссылка на окна
 processing_window_instance = None
@@ -15,6 +18,9 @@ data_balancing_smote_instance = None
 classification_app_instance  = None
 selection_of_parameters_instance = None
 inference_trained_models_instance = None
+load_dataset_window_instance = None
+splitting_dataset_window_instance = None
+checking_data_formats_window_instance = None
     
 class TrainingWindow(QWidget):
     def __init__(self):
@@ -26,12 +32,20 @@ class TrainingWindow(QWidget):
         self.setMinimumSize(400, 300)    
         # Начальное отображение окна с определённым размером
         self.resize(400, 300)
+        # === Кнопки ===
+        btn_load_dataset = QPushButton("📥 Загрузка датасета")
+        btn_load_dataset.clicked.connect(self.open_load_dataset)
+        btn_check_formats = QPushButton("🔍 Проверка форматов данных")
+        btn_check_formats.clicked.connect(self.open_checking_data_formats)       
     
         # Создаем кнопки
         btn_process_nan_value = QPushButton("Удаление пропущеных значений")
         btn_process_nan_value.clicked.connect(self.deleteNanValue)
         btn_process_fix_non_numeric = QPushButton("Обработка не числовых значений")
         btn_process_fix_non_numeric.clicked.connect(self.fixNonNumericValue)
+        btn_split_dataset = QPushButton("✂️ Разделение датасета")
+        btn_split_dataset.clicked.connect(self.open_splitting_dataset)
+        
         btn_correlation_plot = QPushButton("Корреляция параметров (график)")
         btn_correlation_plot.clicked.connect(self.openCorrelationGraph)
         btn_edit_dataset = QPushButton("Редактирование датасета (SMOTE, TRIM)")
@@ -41,25 +55,44 @@ class TrainingWindow(QWidget):
         btn_hyperparameters_tuning = QPushButton("Подбор параметров для модели и обучение")
         btn_hyperparameters_tuning.clicked.connect(self.openHyperParametersTuning)
         btn_inference_models = QPushButton("Инференс модели")
-        btn_inference_models.clicked.connect(self.openInferenceTrainedModels)
-        
+        btn_inference_models.clicked.connect(self.openInferenceTrainedModels)       
         layout = QVBoxLayout()
+        layout.addWidget(btn_load_dataset)
+        layout.addWidget(btn_check_formats)
         layout.addWidget(btn_process_nan_value)
+        layout.addWidget(btn_split_dataset)
         layout.addWidget(btn_process_fix_non_numeric)
         layout.addWidget(btn_correlation_plot)
         layout.addWidget(btn_edit_dataset)
         layout.addWidget(btn_model_selection)
         layout.addWidget(btn_hyperparameters_tuning)
-        layout.addWidget(btn_inference_models)
-    
+        layout.addWidget(btn_inference_models)    
         # Устанавливаем макет
         self.setLayout(layout)
+        
+    def open_load_dataset(self):
+        global load_dataset_window_instance
+        if not load_dataset_window_instance or not load_dataset_window_instance.isVisible():
+            load_dataset_window_instance = LoadDatasetWindow()
+            load_dataset_window_instance.show()
+            
+    def open_checking_data_formats(self):
+        global checking_data_formats_window_instance
+        if not checking_data_formats_window_instance or not checking_data_formats_window_instance.isVisible():
+            checking_data_formats_window_instance = CheckingDataFormatsWindow()
+            checking_data_formats_window_instance.show()
         
     def open_classification_app(self):
         global classification_app_instance
         if not classification_app_instance or not classification_app_instance.isVisible():
             classification_app_instance = ClassificationApp()
-            classification_app_instance.show()        
+            classification_app_instance.show()  
+            
+    def open_splitting_dataset(self):
+        global splitting_dataset_window_instance
+        if not splitting_dataset_window_instance or not splitting_dataset_window_instance.isVisible():
+            splitting_dataset_window_instance = SplittingDatasetWindow()
+            splitting_dataset_window_instance.show()      
         
     def deleteNanValue(self):
         global processing_window_instance

@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox,
     QPushButton, QMessageBox, QFrame
 )
 from PySide6.QtGui import QIcon
@@ -71,27 +71,29 @@ class RandomSearchConfigGUI(QWidget):
             'n_iter': {
                 "default": 100,
                 "tooltip": "Количество итераций случайного поиска.\n"
-                           "Больше — точнее, но дольше."
+                        "Больше — точнее, но дольше."
             },
             'cv': {
                 "default": 5,
                 "tooltip": "Количество фолдов кросс-валидации.\n"
-                           "Обычно 3–10. Чем больше — надёжнее оценка, но медленнее."
+                        "Обычно 3–10. Чем больше — надёжнее оценка, но медленнее."
             },
             'scoring': {
-                "default": ['accuracy'],
-                "tooltip": "Метрики для оценки моделей.\n"
-                           "Можно указать несколько: ['accuracy', 'f1_macro']"
+                "default": {"accuracy": "accuracy", "f1_macro": "f1_macro", "roc_auc": "roc_auc"},
+                "tooltip": "Словарь метрик для оценки.\n"
+                        "Формат: {'название': 'метрика'}\n"
+                        "Пример: {'accuracy': 'accuracy', 'f1_macro': 'f1_macro', 'roc_auc': 'roc_auc'}\n"
+                        "Допустимые имена: accuracy, f1_macro, roc_auc, precision_macro, recall_macro и др."
             },
             'refit': {
-                "default": 'accuracy',
-                "tooltip": "Метрика, по которой выбирается лучшая модель.\n"
-                           "Должна быть одной из 'scoring'."
+                "default": "roc_auc",
+                "tooltip": "Ключ из 'scoring', по которому выбирается лучшая модель.\n"
+                        "Пример: 'roc_auc' или 'accuracy'."
             },
             'test_size': {
                 "default": 0.2,
                 "tooltip": "Доля данных, выделенных на тестовую выборку.\n"
-                           "Обычно: 0.2 (20%)"
+                        "Обычно: 0.2 (20%)"
             },
             'random_state': {
                 "default": 42,
@@ -100,15 +102,14 @@ class RandomSearchConfigGUI(QWidget):
             'verbose': {
                 "default": 1,
                 "tooltip": "Уровень детализации вывода:\n"
-                           "0 — тихо, 1 — информация по итерациям, 2 — подробно."
+                        "0 — тихо, 1 — информация по итерациям, 2 — подробно."
             },
             'n_jobs': {
                 "default": -1,
                 "tooltip": "Количество ядер CPU.\n"
-                           "-1 = все доступные ядра."
+                        "-1 = все доступные ядра."
             }
         }
-
     def load_search_params(self):
         """Загружает текущие параметры и создаёт поля ввода"""
         self.clear_layout(self.fields_layout)
@@ -123,11 +124,29 @@ class RandomSearchConfigGUI(QWidget):
             label = QLabel(f"{param_name}:")
             row.addWidget(label)
 
-            edit = QLineEdit(self.format_value(current_value))
-            edit.setToolTip(str(current_value))
-            row.addWidget(edit)
-            self.text_fields[param_name] = edit
+            # === Особое поле для 'refit' ===
+            if param_name == "refit":
+                # Получаем ключи из scoring (в текущих параметрах или по умолчанию)
+                scoring_dict = current_params.get("scoring", self.param_info["scoring"]["default"])
+                if isinstance(scoring_dict, dict):
+                    options = list(scoring_dict.keys())
+                else:
+                    options = ["accuracy"]  # fallback
 
+                combo = QComboBox()
+                combo.addItems(options)
+                combo.setCurrentText(str(current_value) if str(current_value) in options else options[0])
+                row.addWidget(combo)
+                self.text_fields[param_name] = combo
+
+            else:
+                # Для всех остальных — QLineEdit
+                edit = QLineEdit(self.format_value(current_value))
+                edit.setToolTip(str(current_value))
+                row.addWidget(edit)
+                self.text_fields[param_name] = edit
+
+            # Кнопка помощи
             btn = QPushButton()
             btn.setFixedSize(24, 24)
             btn.setIcon(QIcon.fromTheme("dialog-question", self.style().standardIcon(QStyle.SP_MessageBoxQuestion)))
@@ -136,22 +155,32 @@ class RandomSearchConfigGUI(QWidget):
 
             self.fields_layout.addLayout(row)
 
+
     def format_value(self, value):
         """Форматирует значение для отображения в QLineEdit"""
-        if isinstance(value, (list, tuple)):
+        if isinstance(value, dict):
+            # Форматируем словарь как строку с двойными кавычками (JSON-совместимо)
+            items = [f"'{k}': '{v}'" for k, v in value.items()]
+            return "{" + ", ".join(items) + "}"
+        elif isinstance(value, (list, tuple)):
             return str(value)
         elif isinstance(value, str):
             return f"'{value}'"
         else:
             return str(value)
 
+
     def show_help(self, message):
         """Показывает подсказку в виде QMessageBox"""
         QMessageBox.information(self, "Справка: Параметр RandomizedSearchCV", message)
 
-    def parse_value(self, param_name, text):
-        """Безопасно парсит значение из строки"""
-        text = text.strip()
+    def parse_value(self, param_name, widget):
+        """Безопасно парсит значение из поля (QLineEdit или QComboBox)"""
+        # Определяем, какой тип виджета
+        if isinstance(widget, QComboBox):
+            return widget.currentText()
+
+        text = widget.text().strip() if isinstance(widget, QLineEdit) else str(widget)
         default_value = self.param_info[param_name]["default"]
 
         try:
@@ -160,28 +189,32 @@ class RandomSearchConfigGUI(QWidget):
             elif isinstance(default_value, float):
                 return float(text)
             elif isinstance(default_value, list):
-                # Безопасный разбор списка
                 if text.startswith('[') and text.endswith(']'):
                     return ast.literal_eval(text)
                 else:
-                    # Попробуем как строку
-                    return text
+                    return default_value
+            elif isinstance(default_value, dict):
+                if text.startswith("{") and text.endswith("}"):
+                    return ast.literal_eval(text)
+                else:
+                    return default_value
             elif isinstance(default_value, str):
                 if text.startswith("'") and text.endswith("'"):
                     return text[1:-1]
                 return text
             else:
                 return ast.literal_eval(text)
-        except Exception:
-            return default_value  # Возвращаем значение по умолчанию при ошибке
+        except Exception as e:
+            print(f"Ошибка парсинга {param_name}: {text} -> {e}")
+            return default_value
 
     def on_save_clicked(self):
         """Обработчик кнопки 'Сохранить'"""
         try:
             updated_params = {}
             for param_name in self.param_info:
-                text = self.text_fields[param_name].text()
-                value = self.parse_value(param_name, text)
+                widget = self.text_fields[param_name]
+                value = self.parse_value(param_name, widget)
                 updated_params[param_name] = value
 
             # Сохраняем

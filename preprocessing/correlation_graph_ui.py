@@ -10,8 +10,11 @@ from PySide6.QtWidgets import (
     QLabel,
     QComboBox,
     QVBoxLayout,
-    QHBoxLayout
+    QHBoxLayout,
+    QMessageBox
 )
+import numpy as np
+
 
 class CorrelationGraphUI(QWidget):
     def __init__(self):
@@ -60,27 +63,22 @@ class CorrelationGraphUI(QWidget):
         self.setLayout(v_layout_main)
     
     def selectDataset(self):
-        # Получаем абсолютный путь к текущему файлу (правильно используем __file__)
-        current_file_path = os.path.abspath(__file__)  # Обратите внимание на двойное подчеркивание!
-        
-        # Поднимаемся на уровень выше, чтобы выйти из src и попасть в корневую директорию проекта
+        # Получаем абсолютный путь к текущему файлу
+        current_file_path = os.path.abspath(__file__)
         project_root = os.path.dirname(os.path.dirname(current_file_path))
-        
-        # Формируем путь к папке processed_dataset
         start_directory = os.path.join(project_root, 'dataset')
         
-        # Диалог открытия файла начинается с директории processed_dataset
         file_name, _ = QFileDialog.getOpenFileName(
             self,
             'Открыть файл',
-            start_directory,  # Начало пути из папки processed_dataset
+            start_directory,
             'CSV (*.csv);;Excel (*.xls *.xlsx)'
         )
         
         if file_name:
             try:
                 self.df = pd.read_csv(file_name) if '.csv' in file_name else pd.read_excel(file_name)
-                self.file_name = file_name  # запоминаем полное имя файла
+                self.file_name = file_name
                 self.label_dataset_status.setText(f'Загружено {len(self.df)} строк.')
                 self.combo_box_columns.clear()
                 self.combo_box_columns.addItems(list(self.df.columns))
@@ -94,14 +92,11 @@ class CorrelationGraphUI(QWidget):
             self.target_variable = target_column
             class_counts = self.df[self.target_variable].value_counts().sort_values(ascending=False)
             
-            # Ограничиваем количество отображаемых классов до первых 15-ти
             top_classes = class_counts.head(15)
             
-            # Формируем строку распределения классов
             distribution_text = f'\n{"-" * 30}\nРаспределение записей по категориям:\n'
             distribution_text += "\n".join([f"{cls}: {cnt}" for cls, cnt in top_classes.items()])
             
-            # Если всего классов больше 15, добавляем сообщение о наличии остальных классов
             total_classes_count = len(class_counts)
             if total_classes_count > 15:
                 remaining_classes_count = total_classes_count - 15
@@ -111,12 +106,9 @@ class CorrelationGraphUI(QWidget):
             self.label_dataset_status.setText(f'Цель выбрана: {target_column}')
     
     def removeTargetVariable(self):
-        # Проверяем существование целевой переменной
         if hasattr(self, 'target_variable'):
-            # Удаляем указанный признак из DataFrame
             self.df.drop(columns=self.target_variable, inplace=True)
             del self.target_variable
-            # Обновляем список признаков в комбобоксе
             self.combo_box_columns.clear()
             self.combo_box_columns.addItems(list(self.df.columns))
             self.class_distribution_label.clear()
@@ -125,27 +117,49 @@ class CorrelationGraphUI(QWidget):
             self.label_dataset_status.setText("Ничего не выбрано для удаления.")
     
     def buildCorrelationGraph(self):
-        if hasattr(self, 'df'):
-            corr_matrix = self.df.corr()
-            # Открываем окно большего размера (900 x 900 пикселей)
-            plt.figure(figsize=(12, 9))
-            sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f")
-            plt.title('Матрица корреляций')
-            plt.show()
-        else:
+        if not hasattr(self, 'df'):
             self.label_dataset_status.setText('Сначала выберите датасет!')
+            return
+
+        # ✅ 1. Оставляем только числовые столбцы
+        numeric_df = self.df.select_dtypes(include=['number', 'Int64'])
+        
+        if numeric_df.empty:
+            QMessageBox.warning(self, "Внимание", "Нет числовых столбцов для построения корреляции.")
+            return
+
+        # ✅ 2. Сообщаем, какие столбцы использованы, а какие проигнорированы
+        all_cols = set(self.df.columns)
+        num_cols = set(numeric_df.columns)
+        cat_cols = all_cols - num_cols
+        
+        if cat_cols:
+            ignored_list = ', '.join(sorted(cat_cols))
+            QMessageBox.information(
+                self, "Информация",
+                f"Корреляция строится только по числовым столбцам.\n"
+                f"Игнорируются: {ignored_list}"
+            )
+
+        # Считаем корреляцию
+        corr_matrix = numeric_df.corr()
+
+        # Строим график
+        plt.figure(figsize=(12, 9))
+        sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", square=True)
+        plt.title('Матрица корреляций', fontsize=16)
+        plt.tight_layout()
+        plt.show()
 
     def saveProcessedData(self):
         if not hasattr(self, 'df'):
             self.label_dataset_status.setText('Нет загруженного датасета для сохранения.')
             return
         
-        # Получаем путь к проекту относительно текущего скрипта
-        project_dir = os.getcwd()  # Используем текущую рабочую директорию
+        project_dir = os.getcwd()
         output_folder = os.path.join(project_dir, 'dataset')
         os.makedirs(output_folder, exist_ok=True)
         
-        # Определяем имя выходного файла
         input_filename = os.path.basename(self.file_name)
         output_path = os.path.join(output_folder, input_filename)
         
@@ -155,6 +169,7 @@ class CorrelationGraphUI(QWidget):
         except Exception as e:
             print(e)
             self.label_dataset_status.setText('Ошибка при сохранении файла.')
+
 
 if __name__ == '__main__':
     app = QApplication([])

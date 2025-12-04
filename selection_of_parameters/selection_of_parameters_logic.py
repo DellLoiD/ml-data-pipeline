@@ -1,9 +1,7 @@
-
 from time import perf_counter
 from sklearn.model_selection import train_test_split
 from scipy.stats import loguniform
 import pandas as pd
-
 
 random_grid = {
     'RandomForest': {
@@ -34,29 +32,38 @@ random_grid = {
 random_search_params = {
     'n_iter': 10,
     'cv': 3,
-    'scoring': ['accuracy', 'f1_macro'], 
-    'refit': 'accuracy',
+    'scoring': {
+        'accuracy': 'accuracy',
+        'f1_macro': 'f1_macro',
+        'roc_auc': 'roc_auc'
+    },
+    'refit': 'roc_auc',
     'test_size': 0.2,
-    'random_state': 42, 
+    'random_state': 42,
     'verbose': 2,
     'n_jobs': -1
 }
+
 def get_random_grid():
     return dict(random_grid)
+
 def save_random_grid(new_grid):
     if not isinstance(new_grid, dict):
         raise ValueError("new_grid must be a dict")
     random_grid.clear()
     random_grid.update(new_grid)
     return get_random_grid()
+
 def get_random_search_params():
     return dict(random_search_params)
+
 def save_random_search_params(new_params):
     if not isinstance(new_params, dict):
         raise ValueError("new_params must be a dict")
     random_search_params.clear()
     random_search_params.update(new_params)
     return get_random_search_params()
+
 # Таймер-декоратор
 def timing_decorator(func):
     def wrapper(*args, **kwargs):
@@ -75,8 +82,6 @@ def load_data(filename):
 # Функция разделения данных с таймером
 @timing_decorator
 def split_data(X, y):
-    # Извлекаем значение random_state из словаря
     random_state_value = random_search_params.get('random_state')
     test_size_value = random_search_params.get('test_size')
-    # Разделение данных с использованием извлеченного значения random_state
     return train_test_split(X, y, test_size=test_size_value, random_state=random_state_value)

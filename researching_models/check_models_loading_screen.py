@@ -1,7 +1,6 @@
 from PySide6.QtWidgets import *
 from PySide6.QtCore import *
 from PySide6.QtGui import *
-import sys
 
 class LoadingScreen(QDialog):
     def __init__(self, parent=None):

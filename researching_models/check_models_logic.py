@@ -1,188 +1,292 @@
+# check_models_logic.py
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+)
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 import seaborn as sns
 import matplotlib.pyplot as plt
-from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 import pandas as pd
 import numpy as np
 import os
-from PySide6.QtGui import QPixmap
-from time import perf_counter
 from PySide6.QtWidgets import *
-from sklearn.model_selection import train_test_split
+from PySide6.QtCore import QThread, Signal
 from .check_models_loading_screen import LoadingScreen
 from datetime import datetime
-from sklearn.inspection import permutation_importance
-
-from time import perf_counter, time
 import logging
+
 # Настройка логирования
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Декоратор для измерения времени выполнения функций   random_state_input
-def timing_decorator(func):
-    def wrapper(*args, **kwargs):
-        start_time = perf_counter()
-        result = func(*args, **kwargs)
-        end_time = perf_counter()
-        elapsed_time = f"{func.__name__} took {end_time - start_time:.4f} seconds"
-        return result, elapsed_time
-    return wrapper
-    
+# === Поток для оценки моделей ===
+class EvaluationThread(QThread):
+    # Сигналы
+    finished_signal = Signal(list, str)  # (results, time_text)
+    error_signal = Signal(str)
+
+    def __init__(self, parent, models_config, X, y, n_classes):
+        super().__init__(parent)
+        self.models_config = models_config
+        self.X = X
+        self.y = y
+        self.n_classes = n_classes
+
+    def run(self):
+        try:
+            results = []
+            total_time = 0.0
+
+            for model_name, clf, test_size, random_state in self.models_config:
+                # Разделение
+                X_train, X_test, y_train, y_test = train_test_split(
+                    self.X, self.y, test_size=test_size, random_state=random_state
+                )
+
+                # Масштабирование
+                scaler = StandardScaler()
+                X_train = scaler.fit_transform(X_train)
+                X_test = scaler.transform(X_test)
+
+                # Обучение
+                start_time = datetime.now()
+                clf.fit(X_train, y_train)
+                y_pred = clf.predict(X_test)
+
+                # Метрики
+                average_mode = 'weighted' if self.n_classes > 2 else 'binary'
+                acc = accuracy_score(y_test, y_pred)
+                prec = precision_score(y_test, y_pred, average=average_mode, zero_division=0)
+                rec = recall_score(y_test, y_pred, average=average_mode, zero_division=0)
+                f1 = f1_score(y_test, y_pred, average=average_mode, zero_division=0)
+
+                # ROC-AUC
+                try:
+                    if hasattr(clf, "predict_proba"):
+                        probas = clf.predict_proba(X_test)
+
+                        if self.n_classes == 2:
+                            # Бинарная задача
+                            auc = roc_auc_score(y_test, probas[:, 1])
+                        else:
+                            # Многоклассовая — обязательно указываем multi_class
+                            auc = roc_auc_score(y_test, probas, multi_class='ovr', average='weighted')
+                    else:
+                        auc = "Недоступно (нет predict_proba)"
+                except ValueError as e:
+                    if "multi_class must be in" in str(e):
+                        auc = "Ошибка: требуется multi_class='ovr'"
+                    else:
+                        auc = f"Ошибка: {str(e)[:50]}"
+                except Exception as e:
+                    auc = f"Ошибка: {str(e)[:50]}"
+
+                elapsed = (datetime.now() - start_time).total_seconds()
+                total_time += elapsed
+
+                results.append((model_name, acc, prec, rec, f1, auc))
+
+            time_text = f"Время выполнения: {total_time:.4f} секунд"
+            self.finished_signal.emit(results, time_text)
+
+        except Exception as e:
+            self.error_signal.emit(str(e))
+
+# === Основной класс обработки данных ===
 class DataModelHandler:
-    def __init__(self, parent, df=None, combobox=None, test_size_input=None, random_state_input=None, checkboxes=None,
+    def __init__(self, parent, df=None, combobox=None, checkboxes=None,
                  labels_and_lines=None, accuracy_label=None, time_label=None):
         self.parent = parent
         self.df = df
-        self.X_train = None
-        self.X_test = None
-        self.y_train = None
-        self.y_test = None
-        self.models = {}
         self.combobox = combobox
-        self.test_size_input = test_size_input
-        self.random_state_input = random_state_input
         self.checkboxes = checkboxes
         self.labels_and_lines = labels_and_lines
         self.accuracy_label = accuracy_label
         self.time_label = time_label
-        
+
+        # Для потока
+        self.thread = None
+        self.splash = None
+
     def set_df(self, dataframe):
         self.df = dataframe
-    
-    def update_dataframe(self, new_df):        
+
+    def update_dataframe(self, new_df):
         self.df = new_df
-        if self.combobox is not None:
-            columns = new_df.columns.tolist()
+        if self.combobox:
             self.combobox.clear()
-            self.combobox.addItems(columns)
+            self.combobox.addItems(new_df.columns.tolist())
             self.combobox.setEnabled(True)
-            
+
     def evaluate_models(self):
         if self.df is None or self.df.empty:
-            print("Датасет не загружен!")
+            QMessageBox.critical(self.parent, "Ошибка", "Датасет не загружен!")
             return
-        
-        # Открываем экран загрузки
-        splash_screen = LoadingScreen()
-        QApplication.instance().processEvents()
-        
-        # Получаем выбранную целевую переменную
+
         target_col = self.parent.target_var_combobox.currentText()
-        feature_cols = list(self.df.columns.drop(target_col))
-        X = self.df[feature_cols]
+        if not target_col:
+            QMessageBox.critical(self.parent, "Ошибка", "Не выбрана целевая переменная!")
+            return
+
+        # Удаляем целевую переменную и оставляем ТОЛЬКО числовые колонки
+        X = self.df.drop(columns=[target_col]).select_dtypes(include=['number', 'Int64'])
         y = self.df[target_col]
-        
-        # Проверяем, какие модели активированы пользователями
-        selected_models = []
+
+        # Проверка: остались ли признаки
+        if X.empty:
+            QMessageBox.critical(
+                self.parent, "Ошибка",
+                "После удаления нечисловых колонок не осталось признаков для обучения.\n"
+                "Пожалуйста, закодируйте категориальные переменные (One-Hot, Label и т.д.)."
+            )
+            return
+
+        # 🔔 Показываем пользователю, какие колонки проигнорированы
+        non_numeric = self.df.drop(columns=[target_col]).select_dtypes(include=['object', 'string', 'category'])
+        if not non_numeric.empty:
+            ignored_cols = ', '.join(non_numeric.columns)
+            msg_box = QMessageBox(self.parent)
+            msg_box.setWindowTitle("Информация о признаках")
+            msg_box.setText("Следующие колонки не являются числовыми и не будут использованы в обучении моделей:")
+            msg_box.setInformativeText(f"<b>{ignored_cols}</b>")
+            msg_box.setIcon(QMessageBox.Information)
+            msg_box.setStandardButtons(QMessageBox.Ok)
+            msg_box.exec()
+
+        # Определение типа задачи
+        n_classes = len(y.unique())
+        msg = f"Обнаружено {n_classes} классов.\n"
+        msg += "Задача: Бинарная классификация" if n_classes == 2 else f"Многоклассовая классификация ({n_classes} класса)"
+        QMessageBox.information(self.parent, "Тип задачи", msg)
+
+        # === Сбор моделей ===
+        models_config = []
         for checkbox in self.checkboxes:
             if not checkbox.isChecked():
                 continue
+
             model_name = checkbox.text()
-            model_params = self.labels_and_lines.get(model_name, {})
-            
-            # Определяем параметры каждой модели
-            if model_name == 'Random Forest':
-                n_estimators = int(model_params['Количество деревьев'].text()) if 'Количество деревьев' in model_params else 100
-                test_size = float(model_params['Test Size'].text()) if 'Test Size' in model_params else 0.2
-                random_state = int(model_params['Random State'].text()) if 'Random State' in model_params else 42
-                clf = RandomForestClassifier(n_estimators=n_estimators, random_state=random_state)
-                selected_models.append((model_name, clf, test_size, random_state))
-                
-            elif model_name == 'Gradient Boosting':
-                n_estimators = int(model_params['Количество деревьев'].text()) if 'Количество деревьев' in model_params else 100
-                test_size = float(model_params['Test Size'].text()) if 'Test Size' in model_params else 0.2
-                random_state = int(model_params['Random State'].text()) if 'Random State' in model_params else 42
-                clf = GradientBoostingClassifier(n_estimators=n_estimators, random_state=random_state)
-                selected_models.append((model_name, clf, test_size, random_state))
-                
-            elif model_name == 'Logistic Regression':
-                C = float(model_params['C'].text()) if 'C' in model_params else 1.0
-                max_iter = int(model_params['Max Iterations'].text()) if 'Max Iterations' in model_params else 100
-                penalty = str(model_params['Penalty'].text()) if 'Penalty' in model_params else 'l2'
-                clf = LogisticRegression(C=C, max_iter=max_iter, penalty=penalty)
-                selected_models.append((model_name, clf))
-        
-        # Начинаем оценивать выбранные модели
-        results = []  # Список кортежей (название модели, точность, F1-score, ROC-AUC, время вычисления)
-        for entry in selected_models:
-            if len(entry) == 4:
-                model_name, clf, test_size, random_state = entry
-            else:
-                model_name, clf = entry
-                test_size = 0.2
-                random_state = 42
-            
-            # Логика оценки моделей
-            start_time = datetime.now()
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=random_state)
-            clf.fit(X_train, y_train)
-            y_pred = clf.predict(X_test)
-            probas = clf.predict_proba(X_test)[:, 1]  # Вероятности положительного класса
-            end_time = datetime.now()
-            elapsed_time = (end_time - start_time).total_seconds()
-            
-            # Вычисление метрик
-            acc = accuracy_score(y_test, y_pred)
-            f1 = f1_score(y_test, y_pred)
+            params = self.labels_and_lines.get(model_name, {})
+
             try:
-                auc = roc_auc_score(y_test, probas)
-            except ValueError as e:
-                auc = "Ошибка при расчете AUC"
-            
-            # Добавляем результаты
-            results.append((model_name, acc, f1, auc, elapsed_time))
-        
+                # ✅ Инициализация test_size и random_state по умолчанию
+                test_size = 0.2      # значение по умолчанию
+                random_state = 42    # значение по умолчанию
+
+                # Чтение из полей, если они есть
+                if 'Test Size' in params:
+                    test_size_val = params['Test Size'].text().strip()
+                    if test_size_val:
+                        test_size = float(test_size_val)
+
+                if 'Random State' in params:
+                    random_state_val = params['Random State'].text().strip()
+                    if random_state_val:
+                        random_state = int(random_state_val)
+
+                # Создание модели
+                if model_name == 'Random Forest':
+                    n_estimators = int(params['Количество деревьев'].text())
+                    clf = RandomForestClassifier(n_estimators=n_estimators, random_state=random_state)
+
+                elif model_name == 'Gradient Boosting':
+                    n_estimators = int(params['Количество деревьев'].text())
+                    clf = GradientBoostingClassifier(n_estimators=n_estimators, random_state=random_state)
+
+                elif model_name == 'Logistic Regression':
+                    C = float(params['C'].text())
+                    max_iter = int(params['Max Iterations'].text())
+                    penalty = params['Penalty'].text().strip()
+                    clf = LogisticRegression(
+                        C=C, max_iter=max_iter, penalty=penalty, solver='lbfgs', random_state=random_state  # ← тоже использует random_state
+                    )
+                else:
+                    continue  # неизвестная модель
+
+                # ✅ Теперь test_size и random_state гарантированно существуют
+                models_config.append((model_name, clf, test_size, random_state))
+
+            except Exception as e:
+                QMessageBox.critical(self.parent, "Ошибка", f"Ошибка в параметрах {model_name}:\n{e}")
+                return
+
+        if not models_config:
+            QMessageBox.warning(self.parent, "Предупреждение", "Не выбрано ни одной модели!")
+            return
+
+        # === Запуск в потоке ===
+        self.splash = LoadingScreen()
+        self.splash.show()
+
+        self.thread = EvaluationThread(self.parent, models_config, X, y, n_classes)
+        self.thread.finished_signal.connect(self.on_evaluation_finished)
+        self.thread.error_signal.connect(self.on_evaluation_error)
+        self.thread.start()
+
+
+
+    def on_evaluation_finished(self, results, time_text):
+        if self.splash:
+            self.splash.close()
+
         # Формирование отчёта
-        report = ""
+        report_lines = []
         for result in results:
-            model_name, acc, f1, auc, _ = result
-            report += f"{model_name}:\nТочность={acc:.4f}, F1-Score={f1:.4f}, ROC-AUC={auc}\n\n"
-        
-        # Общая статистика по времени выполнения
-        total_time = sum(result[-1] for result in results)
-        time_text = f"Время выполнения: {total_time:.4f} секунд"
-        
-        # Закрываем экран загрузки
-        splash_screen.close()
-        
-        # Обновляем интерфейс результатами
-        self.accuracy_label.setText(report.strip())
+            model_name, acc, prec, rec, f1, auc = result
+            line = (f"<b>{model_name}:</b><br>"
+                    f"Точность={acc:.4f}, "
+                    f"Precision={prec:.4f}, "
+                    f"Recall={rec:.4f}, "
+                    f"F1-Score={f1:.4f}, "
+                    f"ROC-AUC={auc}")
+            report_lines.append(line)
+
         self.time_label.setText(time_text)
-        
+        if hasattr(self.parent, 'update_metrics_display'):
+            self.parent.update_metrics_display(report_lines)
+
+    def on_evaluation_error(self, error_msg):
+        if self.splash:
+            self.splash.close()
+        QMessageBox.critical(self.parent, "Ошибка при обучении", f"Произошла ошибка:\n{error_msg}")
+
     def split_dataset(self):
-        logging.info("Начало разделения данных...")
-        # Получаем параметры из выбранного интерфейса
-        # Предположим, первая выбранная модель задаёт общий Test Size и Random State
+        """Разделение данных для анализа важности признаков"""
+        test_size = 0.2
+        random_state = 42
+
         for checkbox in self.checkboxes:
             if checkbox.isChecked():
-                first_model_name = checkbox.text()
+                model_name = checkbox.text()
+                params = self.labels_and_lines.get(model_name, {})
+                try:
+                    test_size = float(params['Test Size'].text())
+                    random_state = int(params['Random State'].text())
+                except:
+                    pass
                 break
-        else:
-            raise ValueError("Ни одна модель не была выбрана.")
 
-        # Теперь получаем значения из полей ввода первой выбранной модели
-        model_params = self.labels_and_lines.get(first_model_name, {})
-        test_size = float(model_params['Test Size'].text()) if 'Test Size' in model_params else 0.2
-        random_state = int(model_params['Random State'].text()) if 'Random State' in model_params else 42
+        target_col = self.df.columns[-1]  # или взять из интерфейса
 
-        # Остальные строки остаются неизменёнными
-        target_column = self.df.columns[-1]
-        X = self.df.drop(target_column, axis=1)
-        y = self.df[target_column]
-        logging.debug(f"Датасет: {len(self.df)} строк, {len(self.df.columns)} столбцов.")
+        # Только числовые признаки
+        X = self.df.drop(columns=[target_col]).select_dtypes(include=['number', 'Int64'])
+        y = self.df[target_col]
+
+        if X.empty:
+            raise ValueError(
+                "Нет числовых признаков. Закодируйте категориальные переменные перед анализом."
+            )
 
         self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(
             X, y, test_size=test_size, random_state=random_state
         )
 
-    # Информируем о завершении процедуры
-    logging.info("Разделение данных завершилось успешно.")
-        
+
     def calculate_feature_importances(self, selected_models=None):
         splash_screen = LoadingScreen()
-        splash_screen.show()  # Показываем экран загрузки сразу после входа в метод
+        splash_screen.show()
 
         self.split_dataset()
         results = {}
@@ -191,44 +295,53 @@ class DataModelHandler:
             if not active:
                 continue
 
-            model_params = self.labels_and_lines.get(model_name, {})
-
-            match model_name:
-                case 'Random Forest':
-                    n_estimators = int(model_params.get('Количество').text() if 'Количество' in model_params else '100')
-                    random_state = int(model_params.get('Random State').text() if 'Random State' in model_params else '42')
+            params = self.labels_and_lines.get(model_name, {})
+            try:
+                if model_name == 'Random Forest':
+                    n_estimators = int(params['Количество деревьев'].text())
+                    random_state = int(params['Random State'].text())
                     clf = RandomForestClassifier(n_estimators=n_estimators, random_state=random_state)
-                case 'Gradient Boosting':
-                    n_estimators = int(model_params.get('Количество').text() if 'Количество' in model_params else '100')
-                    random_state = int(model_params.get('Random State').text() if 'Random State' in model_params else '42')
+
+                elif model_name == 'Gradient Boosting':
+                    n_estimators = int(params['Количество деревьев'].text())
+                    random_state = int(params['Random State'].text())
                     clf = GradientBoostingClassifier(n_estimators=n_estimators, random_state=random_state)
-                case 'Logistic Regression':
-                    C = float(model_params.get('C').text() if 'C' in model_params else '1.0')
-                    max_iter = int(model_params.get('Max Iterations').text() if 'Max Iterations' in model_params else '100')
-                    penalty = str(model_params.get('Penalty').text() if 'Penalty' in model_params else 'l2')
-                    clf = LogisticRegression(C=C, max_iter=max_iter, penalty=penalty)
-                case _:
-                    continue  # Пропускаем неизвестные модели
 
-            clf.fit(self.X_train, self.y_train)
-            feature_names = list(self.df.columns[:-1])
-            importances = clf.feature_importances_ if hasattr(clf, 'feature_importances_') else np.abs(clf.coef_[0])
+                elif model_name == 'Logistic Regression':
+                    C = float(params['C'].text())
+                    max_iter = int(params['Max Iterations'].text())
+                    penalty = params['Penalty'].text().strip()
+                    clf = LogisticRegression(C=C, max_iter=max_iter, penalty=penalty, solver='liblinear')
 
-            features_df = pd.DataFrame({
-                'Feature': feature_names,
-                'Importance': importances
-            })
-            features_df.sort_values(by='Importance', ascending=False, inplace=True)
+                else:
+                    continue
 
-            plt.figure(figsize=(10, 8))
-            sns.barplot(x='Importance', y='Feature', data=features_df)
-            plt.title(f"Важность признаков ({model_name})")
-            plt.tight_layout()
-            plt.savefig(f"plots/{model_name}_feature_importance.png")
-            plt.show()
+                scaler = StandardScaler()
+                X_train_scaled = scaler.fit_transform(self.X_train)
+                X_test_scaled = scaler.transform(self.X_test)
 
-            results[model_name] = features_df
+                clf.fit(X_train_scaled, self.y_train)
+                feature_names = list(self.df.columns[:-1])
+                importances = (
+                    clf.feature_importances_ if hasattr(clf, 'feature_importances_')
+                    else np.abs(clf.coef_[0])
+                )
 
-        splash_screen.close()  # Скрываем экран загрузки после завершения всех операций
+                features_df = pd.DataFrame({'Feature': feature_names, 'Importance': importances})
+                features_df = features_df.sort_values(by='Importance', ascending=False)
+
+                plt.figure(figsize=(10, 8))
+                sns.barplot(x='Importance', y='Feature', data=features_df)
+                plt.title(f"Важность признаков ({model_name})")
+                plt.tight_layout()
+                os.makedirs("plots", exist_ok=True)
+                plt.savefig(f"plots/{model_name}_feature_importance.png")
+                plt.show()
+
+                results[model_name] = features_df
+
+            except Exception as e:
+                QMessageBox.critical(self.parent, "Ошибка", f"Ошибка при построении графика {model_name}:\n{e}")
+
+        splash_screen.close()
         return results
-    
