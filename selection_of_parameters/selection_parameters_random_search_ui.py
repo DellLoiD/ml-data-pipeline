@@ -1,11 +1,10 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QComboBox,
-    QPushButton, QMessageBox, QFrame
+    QPushButton, QMessageBox, QFrame, QInputDialog
 )
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QStyle
 import ast
-import sys
 
 # Импорты логики
 from .selection_of_parameters_logic import (
@@ -17,19 +16,70 @@ from .selection_of_parameters_logic import (
 class RandomSearchConfigGUI(QWidget):
     def __init__(self):
         super().__init__()
+
+        # === 🔥 ШАГ 1: Показываем диалог выбора задачи при старте ===
+        task, ok = QInputDialog.getItem(
+            self, "Тип задачи", "Выберите тип задачи:",
+            ["Классификация", "Регрессия"],
+            current=0,
+            editable=False
+        )
+        if not ok:
+            # Если отмена — выбираем по умолчанию
+            self.task_type = "classification"
+            QMessageBox.warning(self, "Внимание", "Тип задачи не выбран. Будет использована классификация.")
+        else:
+            self.task_type = "classification" if task == "Классификация" else "regression"
+
+        # === 🔥 ШАГ 2: Устанавливаем refit и scoring по умолчанию для выбранной задачи ===
+        self._set_default_scoring_and_refit()
+
+        # === Инициализация UI ===
         self.text_fields = {}
-        self.param_info = self.get_param_info()  # Кэшируем
+        self.param_info = self.get_param_info()  # Теперь зависит от self.task_type
         self.initUI()
+
+    def _set_default_scoring_and_refit(self):
+        """Устанавливает scoring и refit в зависимости от задачи"""
+        params = get_random_search_params()
+
+        if self.task_type == "classification":
+            default_scoring = {"accuracy": "accuracy", "f1_macro": "f1_macro", "roc_auc": "roc_auc"}
+            default_refit = "roc_auc"
+        else:
+            default_scoring = {
+                "r2": "r2",
+                "neg_mean_squared_error": "neg_mean_squared_error",
+                "neg_mean_absolute_error": "neg_mean_absolute_error"
+            }
+            default_refit = "r2"
+
+        # Обновляем только если изменилось
+        updated = False
+        if params.get("scoring") != default_scoring:
+            params["scoring"] = default_scoring
+            updated = True
+        if params.get("refit") != default_refit:
+            params["refit"] = default_refit
+            updated = True
+
+        if updated:
+            save_random_search_params(params)
 
     def initUI(self):
         main_layout = QVBoxLayout()
         self.setWindowTitle("Конфигурация RandomizedSearchCV")
         self.setWindowIcon(QIcon.fromTheme("configure"))
 
-        # === Описание ===
-        desc = QLabel("Настройки поиска гиперпараметров (RandomizedSearchCV)")
-        desc.setStyleSheet("font-size: 14px; font-weight: bold; margin-bottom: 10px;")
-        main_layout.addWidget(desc)
+        # === Заголовок ===
+        title = QLabel("Настройки поиска гиперпараметров (RandomizedSearchCV)")
+        title.setStyleSheet("font-size: 14px; font-weight: bold; margin-bottom: 10px;")
+        main_layout.addWidget(title)
+
+        # === Метка типа задачи ===
+        self.task_label = QLabel(f"Текущая задача: <b>{'Классификация' if self.task_type == 'classification' else 'Регрессия'}</b>")
+        self.task_label.setStyleSheet("color: #1E90FF; font-weight: bold;")
+        main_layout.addWidget(self.task_label)
 
         # Разделитель
         line = QFrame()
@@ -48,7 +98,6 @@ class RandomSearchConfigGUI(QWidget):
         save_button.setStyleSheet("font-size: 12px; padding: 10px;")
         main_layout.addWidget(save_button)
 
-        # Устанавливаем макет
         self.setLayout(main_layout)
         self.resize(600, 400)
 
@@ -66,34 +115,47 @@ class RandomSearchConfigGUI(QWidget):
                         self.clear_layout(child_layout)
 
     def get_param_info(self):
-        """Описание параметров RandomizedSearchCV с подсказками и значениями по умолчанию"""
+        """Возвращает параметры с учётом типа задачи"""
+        if self.task_type == "classification":
+            default_scoring = {"accuracy": "accuracy", "f1_macro": "f1_macro", "roc_auc": "roc_auc"}
+            default_refit = "roc_auc"
+            scoring_tooltip = "Для классификации: accuracy, f1_macro, roc_auc, precision_macro, recall_macro"
+        else:
+            default_scoring = {
+                "r2": "r2",
+                "neg_mean_squared_error": "neg_mean_squared_error",
+                "neg_mean_absolute_error": "neg_mean_absolute_error"
+            }
+            default_refit = "r2"
+            scoring_tooltip = "Для регрессии: r2, neg_mean_squared_error, neg_mean_absolute_error, explained_variance"
+
         return {
             'n_iter': {
                 "default": 100,
                 "tooltip": "Количество итераций случайного поиска.\n"
-                        "Больше — точнее, но дольше."
+                           "Больше — точнее, но дольше."
             },
             'cv': {
                 "default": 5,
                 "tooltip": "Количество фолдов кросс-валидации.\n"
-                        "Обычно 3–10. Чем больше — надёжнее оценка, но медленнее."
+                           "Обычно 3–10. Чем больше — надёжнее оценка, но медленнее."
             },
             'scoring': {
-                "default": {"accuracy": "accuracy", "f1_macro": "f1_macro", "roc_auc": "roc_auc"},
+                "default": default_scoring,
                 "tooltip": "Словарь метрик для оценки.\n"
-                        "Формат: {'название': 'метрика'}\n"
-                        "Пример: {'accuracy': 'accuracy', 'f1_macro': 'f1_macro', 'roc_auc': 'roc_auc'}\n"
-                        "Допустимые имена: accuracy, f1_macro, roc_auc, precision_macro, recall_macro и др."
+                           "Формат: {'название': 'метрика'}\n"
+                           "Пример: {'accuracy': 'accuracy', 'f1_macro': 'f1_macro'}\n\n"
+                           + scoring_tooltip
             },
             'refit': {
-                "default": "roc_auc",
+                "default": default_refit,
                 "tooltip": "Ключ из 'scoring', по которому выбирается лучшая модель.\n"
-                        "Пример: 'roc_auc' или 'accuracy'."
+                           "Пример: 'accuracy', 'f1_macro', 'r2' и т.д."
             },
             'test_size': {
                 "default": 0.2,
                 "tooltip": "Доля данных, выделенных на тестовую выборку.\n"
-                        "Обычно: 0.2 (20%)"
+                           "Обычно: 0.2 (20%)"
             },
             'random_state': {
                 "default": 42,
@@ -102,16 +164,17 @@ class RandomSearchConfigGUI(QWidget):
             'verbose': {
                 "default": 1,
                 "tooltip": "Уровень детализации вывода:\n"
-                        "0 — тихо, 1 — информация по итерациям, 2 — подробно."
+                           "0 — тихо, 1 — информация по итерациям, 2 — подробно."
             },
             'n_jobs': {
                 "default": -1,
                 "tooltip": "Количество ядер CPU.\n"
-                        "-1 = все доступные ядра."
+                           "-1 = все доступные ядра."
             }
         }
+
     def load_search_params(self):
-        """Загружает текущие параметры и создаёт поля ввода"""
+        """Загружает и создаёт поля ввода. Обновляет refit динамически."""
         self.clear_layout(self.fields_layout)
         self.text_fields.clear()
 
@@ -126,21 +189,26 @@ class RandomSearchConfigGUI(QWidget):
 
             # === Особое поле для 'refit' ===
             if param_name == "refit":
-                # Получаем ключи из scoring (в текущих параметрах или по умолчанию)
-                scoring_dict = current_params.get("scoring", self.param_info["scoring"]["default"])
+                # Используем scoring из текущих настроек (уже может быть обновлён)
+                scoring_dict = current_params.get("scoring", info["default"])
                 if isinstance(scoring_dict, dict):
-                    options = list(scoring_dict.keys())
+                    available_metrics = list(scoring_dict.keys())
                 else:
-                    options = ["accuracy"]  # fallback
+                    # fallback на метрики по типу задачи
+                    available_metrics = ["r2"] if self.task_type == "regression" else ["accuracy"]
 
                 combo = QComboBox()
-                combo.addItems(options)
-                combo.setCurrentText(str(current_value) if str(current_value) in options else options[0])
+                combo.addItems(available_metrics)
+                # Устанавливаем текущее значение, если допустимо
+                if current_value in available_metrics:
+                    combo.setCurrentText(current_value)
+                else:
+                    combo.setCurrentText(available_metrics[0])  # fallback
                 row.addWidget(combo)
                 self.text_fields[param_name] = combo
 
             else:
-                # Для всех остальных — QLineEdit
+                # Для других параметров — QLineEdit
                 edit = QLineEdit(self.format_value(current_value))
                 edit.setToolTip(str(current_value))
                 row.addWidget(edit)
@@ -155,11 +223,9 @@ class RandomSearchConfigGUI(QWidget):
 
             self.fields_layout.addLayout(row)
 
-
     def format_value(self, value):
         """Форматирует значение для отображения в QLineEdit"""
         if isinstance(value, dict):
-            # Форматируем словарь как строку с двойными кавычками (JSON-совместимо)
             items = [f"'{k}': '{v}'" for k, v in value.items()]
             return "{" + ", ".join(items) + "}"
         elif isinstance(value, (list, tuple)):
@@ -169,14 +235,12 @@ class RandomSearchConfigGUI(QWidget):
         else:
             return str(value)
 
-
     def show_help(self, message):
-        """Показывает подсказку в виде QMessageBox"""
+        """Показывает подсказку"""
         QMessageBox.information(self, "Справка: Параметр RandomizedSearchCV", message)
 
     def parse_value(self, param_name, widget):
-        """Безопасно парсит значение из поля (QLineEdit или QComboBox)"""
-        # Определяем, какой тип виджета
+        """Безопасно парсит значение из виджета"""
         if isinstance(widget, QComboBox):
             return widget.currentText()
 
@@ -209,7 +273,7 @@ class RandomSearchConfigGUI(QWidget):
             return default_value
 
     def on_save_clicked(self):
-        """Обработчик кнопки 'Сохранить'"""
+        """Сохранение параметров"""
         try:
             updated_params = {}
             for param_name in self.param_info:
@@ -221,7 +285,7 @@ class RandomSearchConfigGUI(QWidget):
             save_random_search_params(updated_params)
             QMessageBox.information(self, "Успех", "Параметры RandomizedSearchCV успешно сохранены!")
 
-            # Перезагружаем, чтобы убедиться
+            # Перезагружаем для актуального отображения
             self.load_search_params()
 
         except Exception as e:

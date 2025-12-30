@@ -1,22 +1,97 @@
 # check_models_ui.py
 import sys
-from .check_models_logic import DataModelHandler
 import pandas as pd
 import os
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QApplication,
     QComboBox, QCheckBox, QFileDialog, QMessageBox, QGroupBox
 )
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QClipboard
 from PySide6.QtCore import Qt
+
+from .check_models_logic import DataModelHandler
+
 
 class ClassificationApp(QWidget):
     def __init__(self):
         super().__init__()
         self.dataset_file_name = ""
+        self.checkboxes = []
+        self.labels_and_lines = {}
+        self.report_text = ""  # Для хранения текста отчёта
         self.init_ui()
 
-        # Инициализация обработчика данных
+    def init_ui(self):
+        # === Основной layout ===
+        main_layout = QVBoxLayout()
+
+        # === Заголовок ===
+        title_label = QLabel('Оценка моделей — Классификация и Регрессия')
+        title_label.setFont(QFont("Arial", 14, QFont.Bold))
+        main_layout.addWidget(title_label)
+
+        # === Кнопка выбора датасета ===
+        self.select_dataset_btn = QPushButton("Выбрать датасет")
+        self.select_dataset_btn.clicked.connect(self.on_select_dataset_clicked)
+        main_layout.addWidget(self.select_dataset_btn)
+
+        # === Выбор целевой переменной ===
+        target_layout = QHBoxLayout()
+        target_layout.addWidget(QLabel("Целевая переменная:"))
+        self.target_var_combobox = QComboBox()
+        self.target_var_combobox.setEnabled(False)
+        target_layout.addWidget(self.target_var_combobox)
+        main_layout.addLayout(target_layout)
+
+        # === Группа: Модели ===
+        models_group = QGroupBox("Модели для оценки")
+        models_layout = QVBoxLayout()
+
+        # --- Классификация ---
+        classification_box = QGroupBox("Классификация")
+        self.classification_layout = QVBoxLayout()
+        classification_box.setLayout(self.classification_layout)
+        models_layout.addWidget(classification_box)
+
+        # --- Регрессия ---
+        regression_box = QGroupBox("Регрессия")
+        self.regression_layout = QVBoxLayout()
+        regression_box.setLayout(self.regression_layout)
+        models_layout.addWidget(regression_box)
+
+        models_group.setLayout(models_layout)
+        main_layout.addWidget(models_group)
+
+        # === Кнопка оценки ===
+        evaluate_models_btn = QPushButton('Оценить выбранные модели')
+        evaluate_models_btn.clicked.connect(self.on_evaluate_models_clicked)
+        main_layout.addWidget(evaluate_models_btn)
+
+        # === Результаты ===
+        results_group = QGroupBox("Результаты оценки моделей")
+        results_layout = QVBoxLayout()
+
+        self.metrics_container = QVBoxLayout()
+        results_layout.addLayout(self.metrics_container)
+
+        self.time_label = QLabel('')
+        results_layout.addWidget(self.time_label)
+
+        # === Кнопка копирования ===
+        copy_btn = QPushButton('Копировать результаты в буфер')
+        copy_btn.clicked.connect(self.on_copy_results)
+        results_layout.addWidget(copy_btn)
+
+        results_group.setLayout(results_layout)
+        main_layout.addWidget(results_group)
+
+        # === Анализ важности признаков ===
+        importance_group = QGroupBox("Анализ важности признаков")
+        self.importance_layout = QVBoxLayout()
+        importance_group.setLayout(self.importance_layout)
+        main_layout.addWidget(importance_group)
+
+        # === Инициализация обработчика ===
         self.data_handler = DataModelHandler(
             parent=self,
             df=None,
@@ -24,141 +99,120 @@ class ClassificationApp(QWidget):
             checkboxes=self.checkboxes,
             labels_and_lines=self.labels_and_lines,
             accuracy_label=self.metrics_container,
-            time_label=self.time_label
+            time_label=self.time_label,
+            task_type="both"
         )
 
-    def init_ui(self):
-        main_layout = QVBoxLayout()
-        title_label = QLabel('Выбор модели и обучение')
-        title_label.setFont(QFont("Arial", 14, QFont.Bold))
-        main_layout.addWidget(title_label)
-        # 1. Выбор датасета
-        self.select_dataset_btn = QPushButton("Выбрать датасет")
-        self.select_dataset_btn.clicked.connect(self.on_select_dataset_clicked)
-        main_layout.addWidget(self.select_dataset_btn)
-        # 2. Выбор целевой переменной
-        target_layout = QHBoxLayout()
-        target_layout.addWidget(QLabel("Целевая переменная:"))
-        self.target_var_combobox = QComboBox()
-        self.target_var_combobox.setEnabled(False)
-        target_layout.addWidget(self.target_var_combobox)
-        main_layout.addLayout(target_layout)
-        # 3. Модель классификации
-        model_group_box = QGroupBox("Модель классификации")
-        model_vlayout = QVBoxLayout()
-        self.checkboxes = []
-        self.labels_and_lines = {}
+        # === Заполняем UI ===
+        self.create_classification_models()
+        self.create_regression_models()
+        self.create_importance_checkboxes()
 
-        models_params = {
-            'Random Forest': ['Количество деревьев', 'Test Size', 'Random State'],
-            'Gradient Boosting': ['Количество деревьев', 'Test Size', 'Random State'],
-            'Logistic Regression': ['C', 'Max Iterations', 'Penalty']
+        # === Финальные настройки ===
+        self.setLayout(main_layout)
+        self.resize(900, 800)
+        self.setWindowTitle("Оценка моделей — Все задачи")
+        self.show()
+
+    def create_classification_models(self):
+        """Создаёт UI для моделей классификации"""
+        models = {
+            'Random Forest Classification': ['Количество деревьев', 'Test Size', 'Random State'],
+            'Gradient Boosting Classification': ['Количество деревьев', 'Test Size', 'Random State'],
+            'Logistic Regression Classification': ['C', 'Max Iterations', 'Penalty']
         }
 
-        for model_name, params_list in models_params.items():
+        defaults = {
+            'Количество деревьев': '100',
+            'Test Size': '0.2',
+            'Random State': '42',
+            'C': '1.0',
+            'Max Iterations': '100',
+            'Penalty': 'l2'
+        }
+
+        for model_name, params in models.items():
             hbox = QHBoxLayout()
             cb = QCheckBox(model_name)
-            cb.setChecked(True if model_name == "Random Forest" else False)
+            cb.setChecked("Random Forest" in model_name)
             self.checkboxes.append(cb)
             hbox.addWidget(cb)
 
             lines = {}
-            for param_name in params_list:
+            for param_name in params:
                 lbl = QLabel(param_name)
                 le = QLineEdit()
-                defaults = {
-                    'Количество деревьев': '100',
-                    'C': '0.01',
-                    'Max Iterations': '100',
-                    'Penalty': 'l2',
-                    'Test Size': '0.2',
-                    'Random State': '42'
-                }
-                le.setText(defaults.get(param_name, ''))
+                le.setFixedWidth(80)
+                le.setText(defaults[param_name])
                 hbox.addWidget(lbl)
                 hbox.addWidget(le)
                 lines[param_name] = le
-
             self.labels_and_lines[model_name] = lines
-            model_vlayout.addLayout(hbox)
+            self.classification_layout.addLayout(hbox)
 
-        model_group_box.setLayout(model_vlayout)
-        main_layout.addWidget(model_group_box)
-
-        # 4. Оценка моделей
-        evaluate_models_btn = QPushButton('Оценить модели')
-        evaluate_models_btn.clicked.connect(self.on_evaluate_models_clicked)
-        main_layout.addWidget(evaluate_models_btn)
-
-        # 5. Результаты оценки — с кнопками-подсказками
-        results_group = QGroupBox("Результаты оценки моделей")
-        results_layout = QVBoxLayout()
-
-        self.metrics_container = QVBoxLayout()  # Контейнер для метрик (вставится сюда)
-        results_layout.addLayout(self.metrics_container)
-
-        self.time_label = QLabel('')
-        results_layout.addWidget(self.time_label)
-
-        results_group.setLayout(results_layout)
-        main_layout.addWidget(results_group)
-
-        # 6. Показать важность признаков
-        models_group_box = QGroupBox("Выберите модель для анализа важности признаков")
-        models_layout = QVBoxLayout()
-
-        self.rf_checkbox = QCheckBox('Random Forest')
-        self.gb_checkbox = QCheckBox('Gradient Boosting')
-        self.lr_checkbox = QCheckBox('Logistic Regression')
-
-        checkboxes_layout = QHBoxLayout()
-        checkboxes_layout.addWidget(self.rf_checkbox)
-        checkboxes_layout.addWidget(self.gb_checkbox)
-        checkboxes_layout.addWidget(self.lr_checkbox)
-        models_layout.addLayout(checkboxes_layout)
-
-        show_importance_btn = QPushButton("Показать важность признаков")
-        show_importance_btn.clicked.connect(self.on_show_feature_importance)
-        models_layout.addWidget(show_importance_btn)
-
-        models_group_box.setLayout(models_layout)
-        main_layout.addWidget(models_group_box)
-
-        self.setLayout(main_layout)
-        self.resize(800, 700)
-        self.setWindowTitle("Оценка моделей классификации")
-        self.show()
-
-    # === Подсказки по метрикам ===
-    def show_metric_help(self, metric_name):
-        descriptions = {
-            "Precision": (
-                "<b>Precision (Точность)</b><br>"
-                "Доля правильно предсказанных положительных объектов среди всех предсказанных как положительные.<br><br>"
-                "Формула: TP / (TP + FP)<br>"
-                "Высокая точность — мало ложных срабатываний."
-            ),
-            "Recall": (
-                "<b>Recall (Полнота)</b><br>"
-                "Доля правильно предсказанных положительных объектов среди всех реальных положительных.<br><br>"
-                "Формула: TP / (TP + FN)<br>"
-                "Высокая полнота — мало пропущенных случаев (важно в медицине)."
-            ),
-            "F1-Score": (
-                "<b>F1-Score</b><br>"
-                "Гармоническое среднее между Precision и Recall.<br><br>"
-                "Формула: 2 * (Precision * Recall) / (Precision + Recall)<br>"
-                "Хорошо работает при несбалансированных данных."
-            ),
-            "ROC-AUC": (
-                "<b>ROC-AUC</b><br>"
-                "Площадь под ROC-кривой. Показывает, насколько хорошо модель различает классы.<br><br>"
-                "Чем ближе к 1.0 — тем лучше.<br>"
-                "Работает на вероятностях, а не на предсказаниях."
-            )
+    def create_regression_models(self):
+        """Создаёт UI для моделей регрессии"""
+        models = {
+            'Random Forest Regression': ['Количество деревьев', 'Test Size', 'Random State'],
+            'Gradient Boosting Regression': ['Количество деревьев', 'Test Size', 'Random State']
         }
-        text = descriptions.get(metric_name, "Нет описания.")
-        QMessageBox.information(self, f"Что такое {metric_name}?", text)
+
+        defaults = {
+            'Количество деревьев': '100',
+            'Test Size': '0.2',
+            'Random State': '42'
+        }
+
+        for model_name, params in models.items():
+            hbox = QHBoxLayout()
+            cb = QCheckBox(model_name)
+            cb.setChecked("Random Forest" in model_name)
+            self.checkboxes.append(cb)
+            hbox.addWidget(cb)
+
+            lines = {}
+            for param_name in params:
+                lbl = QLabel(param_name)
+                le = QLineEdit()
+                le.setFixedWidth(80)
+                le.setText(defaults[param_name])
+                hbox.addWidget(lbl)
+                hbox.addWidget(le)
+                lines[param_name] = le
+            self.labels_and_lines[model_name] = lines
+            self.regression_layout.addLayout(hbox)
+
+    def create_importance_checkboxes(self):
+        """Создаёт чекбоксы для анализа важности"""
+        layout = QHBoxLayout()
+
+        self.rfc_cb = QCheckBox("Random Forest Classification")
+        self.rfc_cb.setChecked(True)
+        layout.addWidget(self.rfc_cb)
+
+        self.gbc_cb = QCheckBox("Gradient Boosting Classification")
+        self.gbc_cb.setChecked(True)
+        layout.addWidget(self.gbc_cb)
+
+        self.lrc_cb = QCheckBox("Logistic Regression Classification")
+        self.lrc_cb.setChecked(True)
+        layout.addWidget(self.lrc_cb)
+
+        self.rfr_cb = QCheckBox("Random Forest Regression")
+        self.rfr_cb.setChecked(True)
+        layout.addWidget(self.rfr_cb)
+
+        self.gbr_cb = QCheckBox("Gradient Boosting Regression")
+        self.gbr_cb.setChecked(True)
+        layout.addWidget(self.gbr_cb)
+
+        layout.addStretch()
+        self.importance_layout.addLayout(layout)
+
+        # Кнопка
+        btn = QPushButton("Показать важность признаков")
+        btn.clicked.connect(self.on_show_feature_importance)
+        self.importance_layout.addWidget(btn)
 
     def on_select_dataset_clicked(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Выберите файл CSV", "./dataset/", "CSV Files (*.csv)")
@@ -184,65 +238,140 @@ class ClassificationApp(QWidget):
 
     def on_show_feature_importance(self):
         selected_models = {}
-        if self.rf_checkbox.isChecked():
-            selected_models['Random Forest'] = True
-        if self.gb_checkbox.isChecked():
-            selected_models['Gradient Boosting'] = True
-        if self.lr_checkbox.isChecked():
-            selected_models['Logistic Regression'] = True
+        if self.rfc_cb.isChecked():
+            selected_models['Random Forest Classification'] = True
+        if self.gbc_cb.isChecked():
+            selected_models['Gradient Boosting Classification'] = True
+        if self.lrc_cb.isChecked():
+            selected_models['Logistic Regression Classification'] = True
+        if self.rfr_cb.isChecked():
+            selected_models['Random Forest Regression'] = True
+        if self.gbr_cb.isChecked():
+            selected_models['Gradient Boosting Regression'] = True
 
         if selected_models:
             self.data_handler.calculate_feature_importances(selected_models)
         else:
-            QMessageBox.warning(self, "Ошибка", "Выберите хотя бы одну модель!")
+            QMessageBox.warning(self, "Ошибка", "Выберите хотя бы одну модель для анализа!")
 
-    # === Метод для обновления UI с метриками и кнопками ===
     def update_metrics_display(self, report_lines):
-        # Очищаем старые метрики
+        """Обновляет отображение метрик — удаляет старые, добавляет новые"""
+        # === Очищаем старые метрики ===
         while self.metrics_container.count():
             child = self.metrics_container.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
+            elif child.layout():
+                # Очистка вложенных лэйаутов
+                while child.layout().count():
+                    subchild = child.layout().takeAt(0)
+                    if subchild.widget():
+                        subchild.widget().deleteLater()
 
-        # Добавляем каждую строку
+        # === Формируем текст отчёта для копирования ===
+        self.report_text = ""
+
         for line in report_lines:
             if not line.strip():
                 continue
-
+            # Добавляем в отображение
             model_label = QLabel(line)
-            model_label.setTextFormat(Qt.TextFormat.RichText)
+            model_label.setTextFormat(Qt.RichText)
             self.metrics_container.addWidget(model_label)
 
-            # Извлекаем метрики и добавляем кнопки
-            self.add_metric_row("Precision", line)
-            self.add_metric_row("Recall", line)
-            self.add_metric_row("F1-Score", line)
-            self.add_metric_row("ROC-AUC", line)
+            # Добавляем в текст для копирования
+            clean_line = line.replace("<b>", "").replace("</b>", "").replace("<br>", "\n  ")
+            self.report_text += clean_line + "\n\n"
 
-            # Разделитель
+            # Определяем, какие метрики показывать
+            metrics_to_show = ["R²", "MSE", "MAE"] if "R²" in line else ["Precision", "Recall", "F1-Score", "ROC-AUC"]
+
+            for metric in metrics_to_show:
+                self.add_metric_row(metric, line)
+
             self.metrics_container.addWidget(self.create_separator())
 
-    def add_metric_row(self, metric_name, line):
-        if metric_name in line:
-            start = line.find(metric_name + "=") + len(metric_name) + 1
-            end = line.find(",", start)
-            if end == -1:
-                end = len(line)
-            value = line[start:end].strip()
+        # Добавляем время выполнения
+        self.report_text += self.time_label.text()
 
-            row = QHBoxLayout()
-            label = QLabel(f"<b>{metric_name}:</b> {value}")
-            label.setTextFormat(Qt.TextFormat.RichText)
-            btn = QPushButton("❓")
-            btn.setFixedSize(24, 24)
-            btn.clicked.connect(lambda: self.show_metric_help(metric_name))
-            row.addWidget(label)
-            row.addWidget(btn)
-            row.addStretch()
-            self.metrics_container.addLayout(row)
+    def add_metric_row(self, metric_name, line):
+        if metric_name not in line:
+            return
+        start = line.find(metric_name + "=") + len(metric_name) + 1
+        end = line.find(",", start)
+        if end == -1:
+            end = len(line)
+        value = line[start:end].strip()
+
+        row = QHBoxLayout()
+        label = QLabel(f"<b>{metric_name}:</b> {value}")
+        label.setTextFormat(Qt.RichText)
+        btn = QPushButton("❓")
+        btn.setFixedSize(24, 24)
+        btn.clicked.connect(lambda: self.show_metric_help(metric_name))
+        row.addWidget(label)
+        row.addWidget(btn)
+        row.addStretch()
+        self.metrics_container.addLayout(row)
 
     def create_separator(self):
         line = QLabel()
         line.setFrameShape(QLabel.HLine)
         line.setFrameShadow(QLabel.Sunken)
         return line
+
+    def show_metric_help(self, metric_name):
+        descriptions = {
+            "Precision": (
+                "<b>Precision (Точность)</b><br>"
+                "Доля правильно предсказанных положительных объектов среди всех предсказанных как положительные.<br><br>"
+                "Формула: TP / (TP + FP)<br>"
+                "Высокая точность — мало ложных срабатываний."
+            ),
+            "Recall": (
+                "<b>Recall (Полнота)</b><br>"
+                "Доля правильно предсказанных положительных объектов среди всех реальных положительных.<br><br>"
+                "Формула: TP / (TP + FN)<br>"
+                "Высокая полнота — мало пропущенных случаев (важно в медицине)."
+            ),
+            "F1-Score": (
+                "<b>F1-Score</b><br>"
+                "Гармоническое среднее между Precision и Recall.<br><br>"
+                "Формула: 2 * (Precision * Recall) / (Precision + Recall)<br>"
+                "Хорошо работает при несбалансированных данных."
+            ),
+            "ROC-AUC": (
+                "<b>ROC-AUC</b><br>"
+                "Площадь под ROC-кривой. Показывает, насколько хорошо модель различает классы.<br><br>"
+                "Чем ближе к 1.0 — тем лучше.<br>"
+                "Работает на вероятностях, а не на предсказаниях."
+            ),
+            "R²": (
+                "<b>R² Score</b><br>"
+                "Показывает, насколько модель объясняет дисперсию данных.<br>"
+                "1.0 — идеально, 0.0 — не лучше среднего, может быть отрицательным."
+            ),
+            "MSE": (
+                "<b>MSE (Mean Squared Error)</b><br>"
+                "Средний квадрат ошибки.<br>Чем ближе к 0 — тем лучше.<br>Чувствителен к выбросам."
+            ),
+            "MAE": (
+                "<b>MAE (Mean Absolute Error)</b><br>"
+                "Среднее абсолютное отклонение.<br>Более устойчива к выбросам, чем MSE."
+            )
+        }
+        text = descriptions.get(metric_name, "Нет описания.")
+        QMessageBox.information(self, f"Что такое {metric_name}?", text)
+
+    def on_copy_results(self):
+        """Копирует текст отчёта в буфер обмена"""
+        if not self.report_text.strip():
+            QMessageBox.information(self, "Копирование", "Нет данных для копирования.")
+            return
+        
+        clipboard = QApplication.clipboard()  # Импортируем ниже
+        clipboard.setText(self.report_text)
+        QMessageBox.information(self, "Копирование", "Результаты скопированы в буфер обмена!")
+
+    # Если не импортирован QApplication — добавь в начало файла:
+    # from PySide6.QtWidgets import QApplication

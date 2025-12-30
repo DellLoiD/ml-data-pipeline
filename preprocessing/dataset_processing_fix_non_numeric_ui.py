@@ -346,7 +346,7 @@ class OneHotEncodingWindow(QWidget):
                 parsed_series[not_parsed] = converted.where(
                     converted.notna(),
                     parsed_series[not_parsed]
-                )
+            )
 
             # Если ни один формат не помог — попробуем auto-parse (fallback)
             still_na = parsed_series.isna()

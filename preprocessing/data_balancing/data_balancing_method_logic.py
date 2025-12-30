@@ -31,10 +31,21 @@ def load_dataset(self):
             self.before_label.setText(f"До балансировки:\n{pd.Series(self.y_train).value_counts()}")
             self.after_label.clear()
         else:
-            QMessageBox.warning(self, "Предупреждение", "Необходимо выбрать целевую переменную!")      
+            QMessageBox.warning(self, "Предупреждение", "Необходимо выбрать целевую переменную!")
+            
 def update_class_distribution(self, distribution_text):
     """Метод обновления текста метки после завершения балансировки"""
-    self.after_label.setText(distribution_text)
+    lines = distribution_text.strip().split('\n')
+    
+    # Оставляем первые N строк (классов)
+    if len(lines) > 3:
+        visible_lines = lines[:3]
+        hidden_count = len(lines) - 3
+        shortened_text = '\n'.join(visible_lines) + f'\n... и ещё {hidden_count} классов'
+    else:
+        shortened_text = distribution_text.strip()
+
+    self.after_label.setText(shortened_text)
 
 def save_dataset(self):
     if self.X_resampled is None or self.y_resampled is None:

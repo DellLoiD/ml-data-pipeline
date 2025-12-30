@@ -26,25 +26,56 @@ class DatasetTrimLogic:
         file_dialog = QFileDialog()
         file_dialog.setDirectory('./dataset')
         file_name, _ = file_dialog.getOpenFileName(ui, "Выбор датасета", "", "CSV Files (*.csv)")
+        
         if file_name:
             df = pd.read_csv(file_name)
             self.dataset_filename = file_name
+            
             numeric_columns = df.select_dtypes(include=['number']).columns.tolist()
-            item, ok = QInputDialog.getItem(ui, "Выбор целевой переменной", "Выберите целевую переменную:", numeric_columns, editable=False)
+            
+            if not numeric_columns:
+                QMessageBox.critical(ui, "Ошибка", "В датасете нет числовых столбцов.")
+                return
+                
+            item, ok = QInputDialog.getItem(
+                ui, 
+                "Выбор целевой переменной", 
+                "Выберите целевую переменную:", 
+                numeric_columns, 
+                editable=False
+            )
+            
             if ok and item:
                 target_col = item
-                feature_cols = list(set(numeric_columns) - set([item]))
+                feature_cols = list(set(numeric_columns) - {item})
                 self.feature_cols = feature_cols
                 self.target_col = target_col
-                self.X = df[self.feature_cols].values
+                
+                self.X = df[feature_cols].values
                 self.y = df[target_col].values
-                self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(self.X, self.y, test_size=0.2, random_state=42)
-                before_stats = pd.Series(self.y_train).value_counts().to_string()
-                ui.before_label.setText(f"До балансировки:\n{before_stats}")
+                
+                self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(
+                    self.X, self.y, test_size=0.2, random_state=42
+                )
+                
+                # === 🔧 Ограничиваем вывод классов до 15 ===
+                class_counts = pd.Series(self.y_train).value_counts()
+                total_classes = len(class_counts)
+                
+                if total_classes > 15:
+                    top_15 = class_counts.iloc[:15]
+                    remaining = total_classes - 15
+                    stats_text = f"{top_15.to_string()}\n... и ещё {remaining} классов"
+                else:
+                    stats_text = class_counts.to_string()
+                
+                ui.before_label.setText(f"До балансировки:\n{stats_text}")
                 ui.after_label.clear()
-                ui.file_name_label.setText(f"Датасет загружен: {file_name.split('/')[-1]}")
+                ui.file_name_label.setText(f"Датасет загружен: {os.path.basename(file_name)}")
+                
             else:
                 QMessageBox.warning(ui, "Предупреждение", "Необходимо выбрать целевую переменную!")
+
                 
     def trim_dataset(self, target_samples):
         if self.X_train is None or self.y_train is None:

@@ -1,0 +1,392 @@
+# hashing_methods_ui.py
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+    QFileDialog, QMessageBox, QComboBox, QGroupBox, QSpinBox,
+    QDialog, QScrollArea, QTextEdit, QFrame, QDialogButtonBox
+)
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
+import os
+import pandas as pd
+import numpy as np
+import hashlib
+import random
+from typing import List, Dict
+
+
+class HashingMethodsWindow(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.df = None
+        self.selected_column = None
+        self.unique_count = 0
+        self.setup_ui()
+
+    def setup_ui(self):
+        self.setWindowTitle("Методы хеширования строковых признаков")
+        self.resize(850, 750) 
+
+        layout = QVBoxLayout()
+
+        # === Заголовок ===
+        title = QLabel("Методы хеширования строковых признаков")
+        title.setFont(QFont("Arial", 14, QFont.Bold))
+        layout.addWidget(title)
+
+        # === Кнопка загрузки датасета ===
+        self.load_btn = QPushButton("📂 Выбрать датасет (CSV)")
+        self.load_btn.clicked.connect(self.load_dataset)
+        layout.addWidget(self.load_btn)
+
+        # === Выбор колонки ===
+        col_layout = QHBoxLayout()
+        col_layout.addWidget(QLabel("Выберите строковую колонку:"))
+        self.column_combo = QComboBox()
+        self.column_combo.setEnabled(False)
+        self.column_combo.currentTextChanged.connect(self.on_column_selected)
+        col_layout.addWidget(self.column_combo)
+        layout.addLayout(col_layout)
+
+        # === Информация о количестве уникальных значений ===
+        self.info_label = QLabel("Количество уникальных значений: —")
+        self.info_label.setStyleSheet("font-weight: bold; margin: 10px 0;")
+        layout.addWidget(self.info_label)
+
+        # === Разделитель ===
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setFrameShadow(QFrame.Sunken)
+        layout.addWidget(line)
+
+        # === Группа методов хеширования ===
+        hash_group = QGroupBox("Методы хеширования")
+        hash_layout = QVBoxLayout()
+
+        # Список методов
+        self.methods = [
+            {
+                "name": "1. Простое хеширование (hash())",
+                "desc": "Использует встроенную функцию hash() для преобразования строки в целое число. "
+                        "Быстро, но результат зависит от сессии Python (не стабилен между запусками). "
+                        "Подходит для временных преобразований.",
+                "min_size": 1,
+                "stable": False
+            },
+            {
+                "name": "2. Feature Hashing («хэш-трик»)",
+                "desc": "Отображает большое количество признаков в фиксированное пространство (n_features) "
+                        "с помощью одной или нескольких хеш-функций. Уменьшает размерность, но возможны коллизии. "
+                        "Используется в моделях с большими категориальными признаками (например, текст, IP).",
+                "min_size": 2,
+                "stable": True
+            },
+            {
+                "name": "3. One-Hot + Хеширование",
+                "desc": "Создаёт one-hot вектор для каждой категории, затем применяет хеширование, "
+                        "чтобы сжать его в меньшее пространство. Позволяет уменьшить размерность "
+                        "при сохранении информации о разреженности.",
+                "min_size": 2,
+                "stable": True
+            },
+            {
+                "name": "4. Embedding + Хеширование",
+                "desc": "Каждая строка сначала преобразуется в эмбеддинг (например, через усреднение букв или "
+                        "предобученную модель), затем применяется хеширование. Полезно, когда важна семантика строк.",
+                "min_size": 1,
+                "stable": True
+            },
+            {
+                "name": "5. Universal Hash Functions",
+                "desc": "Использует случайно выбранную хеш-функцию из семейства, чтобы минимизировать коллизии. "
+                        "Подходит для строгих требований к равномерности распределения хешей.",
+                "min_size": 2,
+                "stable": True
+            },
+            {
+                "name": "6. Count Min Sketch",
+                "desc": "Оценивает частоту элементов с помощью нескольких хеш-функций и двумерной таблицы. "
+                        "Позволяет работать с потоками данных и экономить память. Результат — приближённый.",
+                "min_size": 2,
+                "stable": True
+            }
+        ]
+
+        # Добавляем кнопки и кнопки помощи
+        for method in self.methods:
+            row = QHBoxLayout()
+
+            btn = QPushButton(method["name"])
+            btn.clicked.connect(lambda _, m=method: self.run_hashing_method(m))
+            row.addWidget(btn, 4)
+
+            help_btn = QPushButton("?")
+            help_btn.setFixedSize(25, 25)
+            help_btn.clicked.connect(lambda _, d=method["desc"]: self.show_help(d))
+            row.addWidget(help_btn)
+
+            hash_layout.addLayout(row)
+
+        hash_group.setLayout(hash_layout)
+        layout.addWidget(hash_group)
+
+        # === Кнопка сохранения ===
+        self.save_btn = QPushButton("💾 Сохранить изменённый датасет")
+        self.save_btn.clicked.connect(self.save_dataset)
+        self.save_btn.setEnabled(False)  # Доступна только после хеширования
+        layout.addWidget(self.save_btn)
+
+        # === Кнопка закрытия ===
+        close_btn = QPushButton("Закрыть")
+        close_btn.clicked.connect(self.close)
+        layout.addWidget(close_btn, alignment=Qt.AlignCenter)
+
+        self.setLayout(layout)
+        self.reset_ui()
+
+    def reset_ui(self):
+        self.df = None
+        self.selected_column = None
+        self.unique_count = 0
+        self.column_combo.clear()
+        self.column_combo.setEnabled(False)
+        self.info_label.setText("Количество уникальных значений: —")
+        self.save_btn.setEnabled(False)
+
+    def load_dataset(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Выберите CSV файл", "./dataset", "CSV Files (*.csv)"
+        )
+        if not file_path:
+            return
+
+        try:
+            # Загружаем как строки
+            self.df = pd.read_csv(file_path, dtype=str).fillna("")
+            self._last_loaded_path = file_path
+            categorical_cols = self.df.select_dtypes(include=['object']).columns.tolist()
+
+            # Фильтр: только действительно строковые (не числовые)
+            string_cols = []
+            for col in categorical_cols:
+                sample = self.df[col].dropna().astype(str).head(100)
+                if not pd.to_numeric(sample, errors='coerce').notna().all():
+                    string_cols.append(col)
+
+            if not string_cols:
+                QMessageBox.warning(self, "Нет данных", "В датасете нет строковых колонок для хеширования.")
+                return
+
+            self.column_combo.clear()
+            self.column_combo.addItems(string_cols)
+            self.column_combo.setEnabled(True)
+            self.on_column_selected(string_cols[0])
+
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить файл:\n{e}")
+            self.reset_ui()
+
+    def on_column_selected(self, column):
+        if not column or self.df is None:
+            return
+
+        self.selected_column = column
+        unique_vals = self.df[column].dropna().unique()
+        self.unique_count = len(unique_vals)
+        self.info_label.setText(f"🔢 Уникальных значений: <b>{self.unique_count}</b>")
+
+    def show_help(self, description):
+        """Показывает окно справки"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Справка по методу")
+        dialog.resize(600, 300)
+
+        layout = QVBoxLayout()
+        text_edit = QTextEdit()
+        text_edit.setPlainText(description)
+        text_edit.setReadOnly(True)
+        layout.addWidget(text_edit)
+
+        close_btn = QPushButton("Закрыть")
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn)
+
+        dialog.setLayout(layout)
+        dialog.exec()
+
+    def run_hashing_method(self, method):
+        if not self.selected_column:
+            QMessageBox.warning(self, "Ошибка", "Сначала выберите колонку!")
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Параметры: {method['name']}")
+        layout = QVBoxLayout()
+
+        default_size = max(method["min_size"], self.unique_count * 2)
+
+        layout.addWidget(QLabel(f"Метод: <b>{method['name']}</b>"))
+        layout.addWidget(QLabel("Размер хеш-таблицы (n):"))
+
+        size_input = QSpinBox()
+        size_input.setRange(method["min_size"], 10_000_000)
+        size_input.setValue(default_size)
+        layout.addWidget(size_input)
+
+        hint = QLabel(f"Рекомендуется: ≥ {method['min_size']}")
+        hint.setStyleSheet("color: gray; font-size: 11px;")
+        layout.addWidget(hint)
+
+        buttons = QHBoxLayout()
+        cancel_btn = QPushButton("Отмена")
+        ok_btn = QPushButton("Запустить")
+        buttons.addWidget(cancel_btn)
+        buttons.addWidget(ok_btn)
+        layout.addLayout(buttons)
+
+        cancel_btn.clicked.connect(dialog.reject)
+        ok_btn.clicked.connect(dialog.accept)
+
+        dialog.setLayout(layout)
+
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        n = size_input.value()
+
+        if n < method["min_size"]:
+            QMessageBox.warning(self, "Ошибка", f"Размер таблицы должен быть не менее {method['min_size']}.")
+            return
+
+        # === Применяем метод ===
+        try:
+            new_col_name = f"{self.selected_column}_hashed"
+
+            if method["name"].startswith("1."):
+                self.df[new_col_name] = self.df[self.selected_column].apply(
+                    lambda x: self.simple_hash(x) % n
+                )
+            elif method["name"].startswith("2."):
+                self.df[new_col_name] = self.df[self.selected_column].apply(
+                    lambda x: self.feature_hash(x, n)
+                )
+            elif method["name"].startswith("3."):
+                # Упрощённая версия: хэш от индекса one-hot
+                value_to_idx = {val: i for i, val in enumerate(self.df[self.selected_column].unique())}
+                self.df[new_col_name] = self.df[self.selected_column].map(value_to_idx).apply(
+                    lambda x: self.feature_hash(str(x), n)
+                )
+            elif method["name"].startswith("4."):
+                # Простой embedding: сумма ASCII-кодов
+                def simple_embedding(s):
+                    return sum(ord(c) for c in s) % (2**31)
+                self.df[new_col_name] = self.df[self.selected_column].apply(
+                    lambda x: (simple_embedding(x) + hash(x)) % n
+                )
+            elif method["name"].startswith("5."):
+                a, b = random.randint(1, 100), random.randint(0, 100)
+                self.df[new_col_name] = self.df[self.selected_column].apply(
+                    lambda x: self.universal_hash(x, n, a, b)
+                )
+            elif method["name"].startswith("6."):
+                counts = self.count_min_sketch(self.df[self.selected_column].tolist(), n)
+                self.df[new_col_name] = self.df[self.selected_column].map(
+                    lambda x: counts.get(x, 0)
+                )
+
+            QMessageBox.information(
+                self, "Успех",
+                f"✅ Хеширование завершено!\n"
+                f"Новая колонка: '{new_col_name}'\n"
+                f"Размер таблицы: {n}\n"
+                f"Метод: {method['name']}"
+            )
+
+            # ✅ Активируем кнопку сохранения
+            self.save_btn.setEnabled(True)
+
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось применить хеширование:\n{e}")
+
+    def save_dataset(self):
+        """Сохраняет датасет с хешированной колонкой и спрашивает, удалить ли оригинальную"""
+        if self.df is None or self.selected_column is None:
+            return
+
+        # Создаём диалог: удалить оригинальную колонку?
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Удалить оригинальную колонку?")
+        dialog.resize(400, 150)
+
+        layout = QVBoxLayout()
+
+        label = QLabel(f"Удалить исходную колонку '{self.selected_column}' после хеширования?")
+        label.setWordWrap(True)
+        layout.addWidget(label)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Yes | QDialogButtonBox.No)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        dialog.setLayout(layout)
+
+        if dialog.exec() == QDialog.Accepted:
+            # Пользователь нажал "Да" → удаляем
+            new_df = self.df.drop(columns=[self.selected_column])
+            action_msg = f"✅ Удалена колонка: '{self.selected_column}'"
+        else:
+            # Пользователь нажал "Нет" → оставляем
+            new_df = self.df.copy()
+            action_msg = f"📎 Оригинальная колонка '{self.selected_column}' сохранена"
+
+        # Генерируем имя файла
+        original_name = "dataset.csv"
+        if hasattr(self, '_last_loaded_path') and self._last_loaded_path:
+            original_name = os.path.basename(self._last_loaded_path)
+
+        default_name = f"hashed_{original_name}"
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Сохранить датасет",
+            f"./dataset/{default_name}",
+            "CSV Files (*.csv)"
+        )
+        if not save_path:
+            return
+
+        try:
+            new_df.to_csv(save_path, index=False)
+            QMessageBox.information(
+                self, "Сохранено",
+                f"✅ Датасет успешно сохранён:\n{save_path}\n\n{action_msg}"
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить файл:\n{e}")
+
+
+    # === Реализации методов хеширования ===
+
+    def simple_hash(self, value: str) -> int:
+        return hash(value) % (2**31)
+
+    def feature_hash(self, value: str, n: int) -> int:
+        return int(hashlib.md5(value.encode()).hexdigest(), 16) % n
+
+    def universal_hash(self, value: str, n: int, a: int, b: int, p=2147483647) -> int:
+        x = int(hashlib.sha256(value.encode()).hexdigest()[:15], 16)
+        return ((a * x + b) % p) % n
+
+    def count_min_sketch(self, items: List[str], n: int, d: int = 3) -> Dict[str, int]:
+        tables = [[0] * n for _ in range(d)]
+        hashes = [lambda x, i=i: int(hashlib.sha256(f"{i}{x}".encode()).hexdigest(), 16) % n for i in range(d)]
+        counts = {}
+
+        for item in items:
+            min_count = float('inf')
+            for i in range(d):
+                h = hashes[i](item)
+                tables[i][h] += 1
+                min_count = min(min_count, tables[i][h])
+            counts[item] = min_count
+
+        return counts
