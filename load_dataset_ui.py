@@ -4,7 +4,6 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 import os
-import shutil
 import pandas as pd
 
 
@@ -58,42 +57,59 @@ class LoadDatasetWindow(QWidget):
         os.makedirs(self.dataset_folder, exist_ok=True)
 
     def load_dataset(self):
-        """Открывает диалог выбора файла и загружает его"""
+        """Открывает диалог выбора файла и загружает как {name}_v0.csv + # META: v0"""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Выберите CSV-файл", "", "CSV Files (*.csv);;All Files (*)"
         )
         if not file_path:
             return  # Пользователь отменил выбор
 
-        # Абсолютные пути для корректного сравнения
+        # Исходный путь и имя
         file_path = os.path.abspath(file_path)
-        filename = os.path.basename(file_path)
-        dest_path = os.path.join(self.dataset_folder, filename)
+        original_filename = os.path.basename(file_path)
+        name, ext = os.path.splitext(original_filename)
+
+        # ✅ Правильное имя: {name}_v0.csv
+        new_filename = f"{name}_v0{ext}"
+        dest_path = os.path.join(self.dataset_folder, new_filename)
         dest_path = os.path.abspath(dest_path)
 
         try:
-            # Проверяем, не совпадает ли исходный и целевой путь
+            # Проверяем, не совпадает ли путь
             if file_path == dest_path:
-                # Файл уже в папке dataset — не копируем
-                QMessageBox.information(
-                    self,
-                    "Уже загружен",
-                    f"Датасет с таким именем уже загружен в папку приложения:\n{filename}"
-                )
-            else:
-                # Копируем только если файл из другого места
-                shutil.copy(file_path, dest_path)
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    first_line = f.readline().strip()
+                # Если уже есть # META: v0 — ничего не делаем
+                if first_line == "# META: v0":
+                    QMessageBox.information(self, "Готово", "Файл уже загружен в нужном формате.")
+                    return
 
-            # Читаем датасет из папки dataset
-            df = pd.read_csv(dest_path)
+            # Перезапись?
+            if os.path.exists(dest_path) and file_path != dest_path:
+                reply = QMessageBox.question(
+                    self,
+                    "Файл существует",
+                    f"Файл '{new_filename}' уже существует. Перезаписать?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+                if reply == QMessageBox.No:
+                    return
+
+            # Читаем датасет
+            df = pd.read_csv(file_path, skipinitialspace=True)
+
+            # ✅ Записываем с одной строкой: # META: v0
+            with open(dest_path, "w", encoding="utf-8") as f:
+                f.write("# META: v0\n")  # 🔥 Только это — как вы и хотели
+                df.to_csv(f, index=False, encoding="utf-8", lineterminator="\n")
 
             # Собираем информацию
             rows, cols = df.shape
             dtypes = df.dtypes.value_counts()
             object_cols = df.select_dtypes(include=['object']).columns.tolist()
 
-            # Формируем текст
-            info = f"✅ Файл успешно загружён:\n  {filename}\n\n"
+            info = f"✅ Файл успешно загружён:\n  {new_filename}\n\n"
             info += f"📊 Размер: {rows} строк × {cols} столбцов\n\n"
             info += f"🔢 Типы данных:\n"
             for dtype, count in dtypes.items():
@@ -102,7 +118,7 @@ class LoadDatasetWindow(QWidget):
             if object_cols:
                 info += f"\n⚠️  Столбцы с текстом (object): {len(object_cols)}\n"
                 info += "   Рекомендуется обработать:\n"
-                for col in object_cols[:10]:  # первые 10
+                for col in object_cols[:10]:
                     info += f"   - {col}\n"
                 if len(object_cols) > 10:
                     info += f"   ... и ещё {len(object_cols) - 10}\n"
@@ -110,46 +126,8 @@ class LoadDatasetWindow(QWidget):
                 info += "\n✅ Нет текстовых столбцов — можно продолжать."
 
             self.info_label.setText(info)
-
-            # Показываем сообщение об успехе
-            QMessageBox.information(self, "Успех", f"Датасет сохранён в:\n{dest_path}")
-
-        except shutil.SameFileError:
-            # Перестраховка — на случай, если shutil сам проверит и бросит исключение
-            QMessageBox.information(
-                self,
-                "Уже загружен",
-                f"Датасет с таким именем уже загружен в папку приложения:\n{filename}"
-            )
-            # Пробуем всё равно прочитать, если файл на месте
-            try:
-                df = pd.read_csv(dest_path)
-                rows, cols = df.shape
-                dtypes = df.dtypes.value_counts()
-                object_cols = df.select_dtypes(include=['object']).columns.tolist()
-
-                info = f"✅ Файл уже был загружен:\n  {filename}\n\n"
-                info += f"📊 Размер: {rows} строк × {cols} столбцов\n\n"
-                info += f"🔢 Типы данных:\n"
-                for dtype, count in dtypes.items():
-                    info += f"  • {dtype}: {count} столбец(ов)\n"
-
-                if object_cols:
-                    info += f"\n⚠️  Столбцы с текстом (object): {len(object_cols)}\n"
-                    info += "   Рекомендуется обработать:\n"
-                    for col in object_cols[:10]:
-                        info += f"   - {col}\n"
-                    if len(object_cols) > 10:
-                        info += f"   ... и ещё {len(object_cols) - 10}\n"
-                else:
-                    info += "\n✅ Нет текстовых столбцов — можно продолжать."
-
-                self.info_label.setText(info)
-            except Exception as e:
-                self.info_label.setText("❌ Не удалось прочитать файл из папки dataset.")
-                QMessageBox.critical(self, "Ошибка", f"Не удалось прочитать датасет:\n{str(e)}")
+            QMessageBox.information(self, "Успех", f"Датасет сохранён как:\n{dest_path}")
 
         except Exception as e:
-            # Другие ошибки (например, файл повреждён, нет прав и т.д.)
-            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить датасет:\n{str(e)}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить или сохранить датасет:\n{str(e)}")
             self.info_label.setText("❌ Ошибка при загрузке датасета.")

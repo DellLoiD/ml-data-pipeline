@@ -1,14 +1,23 @@
 # preprocessing/dataset_processing_check_nan.py
 import pandas as pd
-import numpy as np
+import os
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QFileDialog, QMessageBox, QComboBox, QGroupBox,
-    QDialog, QDialogButtonBox
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFileDialog,
+    QMessageBox, QComboBox, QGroupBox, QDialog, QDialogButtonBox, QGridLayout,
+    QListWidget, QListWidgetItem
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
-import os
+from preprocessing.repair_nan_methods.mice_method import impute_mice
+# Импорт логики восстановления
+from .dataset_processing_check_nan_logic import (
+    impute_mean,
+    impute_median,
+    impute_mode,
+    impute_interpolate,
+    impute_knn,
+    impute_hot_deck,
+    impute_em
+)
 
 # 📝 Справки по методам
 IMPUTATION_HELP = {
@@ -73,7 +82,7 @@ class HelpDialog(QDialog):
     def __init__(self, title, text, parent=None):
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.resize(500, 300)
+        self.resize(300, 300)
 
         layout = QVBoxLayout(self)
 
@@ -91,110 +100,150 @@ class MissingValuesDialog(QWidget):
         super().__init__(parent)
         self.parent_widget = parent
         self.df = None
-        self.df_original = None  # Сохраняем оригинал
+        self.df_original = None
         self.selected_file_path = None
-
+        self._version = 1
+        self._meta_data = {}  # {v1: изменения, v2: изменения...}
+        self._pending_changes = []  # Накопленные изменения до сохранения
         self.init_ui()
 
     def init_ui(self):
         main_layout = QVBoxLayout()
-
-        # === Заголовок ===
-        title = QLabel("Проверка и обработка пропусков")
-        title.setFont(QFont("Arial", 14, QFont.Bold))
-        title.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(title)
 
         # === Кнопка выбора датасета ===
         self.btn_select_dataset = QPushButton('📁 Выбрать датасет')
         self.btn_select_dataset.clicked.connect(self.select_raw_dataset)
         main_layout.addWidget(self.btn_select_dataset)
 
-        # === Общее количество строк и колонок ===
+        # === Всего строк и колонок — в одну строку ===
+        stats_layout = QHBoxLayout()
         self.label_total_rows = QLabel("Всего строк: —")
         self.label_total_rows.setStyleSheet("font-weight: bold; color: #0066cc;")
-        main_layout.addWidget(self.label_total_rows)
-
         self.label_total_cols = QLabel("Всего колонок: —")
         self.label_total_cols.setStyleSheet("font-weight: bold; color: #0066cc;")
-        main_layout.addWidget(self.label_total_cols)
+        stats_layout.addWidget(self.label_total_rows)
+        stats_layout.addWidget(self.label_total_cols)
+        stats_layout.addStretch()
+        main_layout.addLayout(stats_layout)
 
-        # === Кнопка показа пропусков ===
-        self.btn_show_missing = QPushButton('🔍 Показать пропуски')
-        self.btn_show_missing.clicked.connect(self.show_missing_values)
-        main_layout.addWidget(self.btn_show_missing)
-
-        # === Отображение списка пропусков ===
-        self.label_missing_info = QLabel("Пропуски не показаны. Нажмите 'Показать пропуски'.")
+        # === Отображение пропусков ===
+        self.label_missing_info = QLabel("Пропуски не показаны.")
         self.label_missing_info.setWordWrap(True)
         self.label_missing_info.setStyleSheet("font-family: 'Courier'; font-size: 12px; background: #f5f5f5; padding: 10px; border-radius: 5px;")
         main_layout.addWidget(self.label_missing_info)
+
+        # === Группа действий ===
+        actions_group = QGroupBox("Действия")
+        actions_layout = QVBoxLayout()
+
+        # Кнопка показа пропусков
+        self.btn_show_missing = QPushButton('🔍 Показать пропуски')
+        self.btn_show_missing.clicked.connect(self.show_missing_values)
+        actions_layout.addWidget(self.btn_show_missing)
+        self.btn_show_missing.hide()
 
         # === Список колонок с пропусками ===
         self.combo_missing_cols = QComboBox()
         self.combo_missing_cols.setEnabled(False)
         self.combo_missing_cols.setPlaceholderText("Колонки с пропусками")
-        main_layout.addWidget(QLabel("Выберите колонку для обработки:"))
-        main_layout.addWidget(self.combo_missing_cols)
+        self.combo_missing_cols.currentTextChanged.connect(self.on_column_selected)
+        actions_layout.addWidget(QLabel("Выберите колонку для обработки:"))
+        actions_layout.addWidget(self.combo_missing_cols)
 
-        # === Группа действий с пропусками ===
-        actions_group = QGroupBox("Действия")
-        actions_layout = QVBoxLayout()
+        # Примеры значений
+        self.label_example_values = QLabel("Примеры значений: —")
+        self.label_example_values.setWordWrap(True)
+        self.label_example_values.setStyleSheet("font-style: italic; color: #555;")
+        actions_layout.addWidget(self.label_example_values)
 
-        # Кнопка удаления пропусков в выбранной колонке
+        # Удаление строк с NaN
         self.btn_drop_col_na = QPushButton("🗑️ Удалить строки с NaN в колонке")
         self.btn_drop_col_na.clicked.connect(self.drop_na_in_column)
         self.btn_drop_col_na.setEnabled(False)
         actions_layout.addWidget(self.btn_drop_col_na)
 
-        # === Методы восстановления ===
-        impute_label = QLabel("Выберите метод восстановления:")
+        # === Методы восстановления — сетка 2×4 ===
+        impute_label = QLabel("Методы восстановления:")
         impute_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
         actions_layout.addWidget(impute_label)
 
-        # Простые методы
-        self.add_imputation_button(actions_layout, "Среднее", "mean")
-        self.add_imputation_button(actions_layout, "Медиана", "median")
-        self.add_imputation_button(actions_layout, "Мода", "mode")
-        self.add_imputation_button(actions_layout, "Интерполяция", "interpolate")
-        self.add_imputation_button(actions_layout, "KNN-Imputer", "knn")
-        self.add_imputation_button(actions_layout, "MICE", "mice")
+        grid_layout = QGridLayout()
+        methods = [
+            ("Среднее", "mean"),
+            ("Медиана", "median"),
+            ("Мода", "mode"),
+            ("Интерполяция", "interpolate"),
+            ("KNN-Imputer", "knn"),
+            ("MICE", "mice"),
+            ("Hot Deck", "hot_deck"),
+            ("EM", "em"),
+        ]
+        for i, (label, key) in enumerate(methods):
+            row = i // 2
+            col = (i % 2) * 2
+            btn = QPushButton(label)
+            btn.clicked.connect(lambda _, k=key: self.impute_column(k))
+            grid_layout.addWidget(btn, row, col)
 
+            help_btn = QPushButton("?")
+            help_btn.setFixedSize(24, 24)
+            help_btn.clicked.connect(lambda _, k=key: self.show_help(k))
+            grid_layout.addWidget(help_btn, row, col + 1)
+
+        actions_layout.addLayout(grid_layout)
         actions_group.setLayout(actions_layout)
         main_layout.addWidget(actions_group)
 
-        # === Кнопки: Сохранить / Закрыть ===
-        buttons_layout = QHBoxLayout()
+        # === История изменений ===
+        history_group = QGroupBox("История изменений")
+        history_layout = QVBoxLayout()
+
+        self.history_list = QListWidget()
+        self.history_list.setStyleSheet("""
+            QListWidget {
+                font-family: 'Courier';
+                font-size: 12px;
+                background: #f8f8f8;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+            }
+            QListWidget::item {
+                padding: 4px;
+            }
+            QListWidget::item:selected {
+                background: #e0f0ff;
+                color: #000;
+            }
+        """)
+        self.history_list.setFixedHeight(120)
+        history_layout.addWidget(self.history_list)
+
+        self.label_detail = QLabel("Выберите версию, чтобы посмотреть изменения.")
+        self.label_detail.setWordWrap(True)
+        self.label_detail.setStyleSheet("font-size: 11px; color: #555;")
+        history_layout.addWidget(self.label_detail)
+
+        history_group.setLayout(history_layout)
+        main_layout.addWidget(history_group)
+
+        # === Кнопка сохранения ===
         self.btn_save = QPushButton("💾 Сохранить датасет")
         self.btn_save.clicked.connect(self.save_dataset)
         self.btn_save.setEnabled(False)
-        buttons_layout.addWidget(self.btn_save)
+        main_layout.addWidget(self.btn_save)
 
-        close_button = QPushButton("❌ Закрыть")
-        close_button.clicked.connect(self.close)
-        buttons_layout.addWidget(close_button)
-
-        main_layout.addLayout(buttons_layout)
-
-        # === Настройки ===
         self.setLayout(main_layout)
         self.setWindowTitle('Обработка пропусков')
-        self.resize(600, 700)
+        self.resize(600, 750)  # Увеличили высоту
 
-    def add_imputation_button(self, layout, label, method_key):
-        """Добавляет кнопку метода + кнопку '?'"""
-        row_layout = QHBoxLayout()
-        btn = QPushButton(label)
-        btn.clicked.connect(lambda: self.impute_column(method_key))
-        row_layout.addWidget(btn)
+        # Подключаем клик по элементу
+        self.history_list.itemClicked.connect(self.on_history_item_clicked)
 
-        help_btn = QPushButton("?")
-        help_btn.setFixedSize(24, 24)
-        help_btn.clicked.connect(lambda: self.show_help(method_key))
-        row_layout.addWidget(help_btn)
-
-        row_layout.addStretch()
-        layout.addLayout(row_layout)
+    def on_history_item_clicked(self, item):
+        """Показывает детали выбранной версии"""
+        version = item.text().split(" ")[0]  # v1
+        changes = self._meta_data.get(version, "Нет информации")
+        self.label_detail.setText(f"🔸 {changes}")
 
     def show_help(self, method_key):
         """Показывает справку по методу"""
@@ -204,37 +253,71 @@ class MissingValuesDialog(QWidget):
             dialog.exec()
 
     def select_raw_dataset(self):
-        """Выбор датасета"""
-        filename, _ = QFileDialog.getOpenFileName(
-            self, 'Выбрать датасет', './dataset', 'CSV Files (*.csv)'
-        )
+        """Выбор датасета с обработкой #META"""
+        filename, _ = self.get_open_filename()
         if not filename:
             return
 
         try:
-            self.df = pd.read_csv(filename)
+            # Читаем # META: строки
+            with open(filename, 'r', encoding='utf-8') as f:
+                meta_lines = []
+                for line in f:
+                    stripped = line.strip()
+                    if stripped.startswith("# META:"):
+                        meta_lines.append(stripped)
+                    elif stripped and not stripped.startswith("#"):
+                        break
+
+                self._meta_data = {}
+                for line in meta_lines:
+                    line = line.replace("# META:", "").strip()
+                    parts = line.split("|")
+                    for part in parts:
+                        part = part.strip()
+                        if part.startswith("v"):
+                            version_part = part.split(maxsplit=1)
+                            if len(version_part) == 2:
+                                ver = version_part[0]
+                                changes = version_part[1]
+                                self._meta_data[ver] = changes
+
+            # Читаем данные
+            self.df = pd.read_csv(filename, comment='#', skipinitialspace=True)
             self.df_original = self.df.copy()
             basename = os.path.basename(filename)
             self.btn_select_dataset.setText(f'✅ {basename}')
             self.selected_file_path = filename
 
+            # Определяем версию
+            name, ext = os.path.splitext(basename)
+            if "_v" in name:
+                try:
+                    self._version = int(name.split("_v")[1]) + 1
+                except:
+                    self._version = 1
+            else:
+                self._version = 1
+
+            # Обновляем интерфейс
             total_rows = len(self.df)
             total_cols = len(self.df.columns)
-
             self.label_total_rows.setText(f"Всего строк: {total_rows}")
             self.label_total_cols.setText(f"Всего колонок: {total_cols}")
 
-            self.combo_missing_cols.clear()
-            self.combo_missing_cols.setEnabled(False)
-            self.btn_drop_col_na.setEnabled(False)
-            self.btn_save.setEnabled(False)
-            self.label_missing_info.setText("Пропуски не показаны. Нажмите 'Показать пропуски'.")
+            self.show_missing_values()
+            self.update_history_display()
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить датасет:\n{e}")
 
+    def get_open_filename(self):
+        return QFileDialog.getOpenFileName(
+            self, 'Выбрать датасет', './dataset', 'CSV Files (*.csv)'
+        )
+
     def show_missing_values(self):
-        """Показывает пропуски в формате: колонка (тип) — количество"""
+        """Показывает пропуски"""
         if self.df is None:
             QMessageBox.warning(self, "Предупреждение", "Сначала выберите датасет!")
             return
@@ -242,36 +325,48 @@ class MissingValuesDialog(QWidget):
         missing_data = self.df.isnull().sum()
         missing_cols = missing_data[missing_data > 0]
 
+        self.combo_missing_cols.clear()
         if missing_cols.empty:
             self.label_missing_info.setText("✅ В датасете нет пропусков.")
-            self.combo_missing_cols.clear()
             self.combo_missing_cols.addItem("Нет колонок с пропусками")
             self.combo_missing_cols.setEnabled(False)
             self.btn_drop_col_na.setEnabled(False)
+            self.label_example_values.setText("Примеры значений: —")
+        else:
+            self.combo_missing_cols.addItems(missing_cols.index.tolist())
+            self.combo_missing_cols.setEnabled(True)
+            self.btn_drop_col_na.setEnabled(True)
+            self.btn_save.setEnabled(True)
+
+            result_text = "<b>Пропуски найдены в:</b><br>"
+            for col, count in missing_cols.items():
+                dtype = str(self.df[col].dtype)
+                result_text += f'{col} <span style="color:gray;">({dtype})</span> — <span style="color:red;">{count}</span><br>'
+            self.label_missing_info.setTextFormat(Qt.RichText)
+            self.label_missing_info.setText(result_text)
+
+            first_col = missing_cols.index[0]
+            self.show_example_values(first_col)
+
+    def on_column_selected(self, column):
+        """При выборе колонки обновляем примеры значений"""
+        if column and column != "Нет колонок с пропусками" and column in self.df.columns:
+            self.show_example_values(column)
+
+    def show_example_values(self, column):
+        """Показывает до 3 уникальных непустых значений"""
+        non_null = self.df[column].dropna().unique()
+        examples = non_null[:3]
+        if len(examples) == 0:
+            self.label_example_values.setText("Примеры значений: (все значения — пропуски)")
             return
 
-        # Обновляем комбобокс
-        self.combo_missing_cols.clear()
-        self.combo_missing_cols.addItems(missing_cols.index.tolist())
-        self.combo_missing_cols.setEnabled(True)
-        self.btn_drop_col_na.setEnabled(True)
-        self.btn_save.setEnabled(True)
-
-        # Формируем текст: колонка (тип) — количество
-        result_text = "<b>Пропуски найдены в:</b><br>"
-        for col, count in missing_cols.items():
-            dtype = str(self.df[col].dtype)
-            result_text += f'{col} <span style="color:gray;">({dtype})</span> — <span style="color:red;">{count}</span><br>'
-        
-        self.label_missing_info.setTextFormat(Qt.RichText)
-        self.label_missing_info.setText(result_text)
-
-        # Обновляем строки/колонки (на всякий случай)
-        self.label_total_rows.setText(f"Всего строк: {len(self.df)}")
-        self.label_total_cols.setText(f"Всего колонок: {len(self.df.columns)}")
+        example_strs = [str(x)[:30] for x in examples]
+        joined = " • ".join(example_strs)
+        self.label_example_values.setText(f"Примеры значений: {joined}")
 
     def drop_na_in_column(self):
-        """Удаляет строки с NaN в выбранной колонке"""
+        """Удаление строк с NaN"""
         col = self.combo_missing_cols.currentText()
         if not col or col not in self.df.columns:
             QMessageBox.warning(self, "Ошибка", "Выберите корректную колонку!")
@@ -282,89 +377,140 @@ class MissingValuesDialog(QWidget):
         after = len(self.df)
         deleted = before - after
 
-        QMessageBox.information(
-            self, "Готово",
-            f"Удалено {deleted} строк с NaN в колонке '{col}'.\n"
-            f"Теперь в датасете {after} строк."
-        )
-        self.show_missing_values()  # Обновляем список
+        change_text = f"удалены строки с NaN в '{col}'"
+        self._pending_changes.append(change_text)
+        self.btn_save.setEnabled(True)
+
+        QMessageBox.information(self, "Готово", f"Удалено {deleted} строк. Осталось: {after}.")
+        self.show_missing_values()
 
     def impute_column(self, method):
-        """Восстановление пропусков в выбранной колонке"""
+        """Восстановление пропусков"""
         col = self.combo_missing_cols.currentText()
         if not col or col not in self.df.columns:
-            QMessageBox.warning(self, "Ошибка", "Выберите колонку!")
+            QMessageBox.warning(self, "Ошибка", "Выберите корректную колонку!")
             return
 
-        series = self.df[col]
+        method_map = {
+            "mean": impute_mean,
+            "median": impute_median,
+            "mode": impute_mode,
+            "interpolate": impute_interpolate,
+            "knn": impute_knn,
+            "mice": impute_mice,
+            "hot_deck": impute_hot_deck,
+            "em": impute_em,
+        }
+
+        if method not in method_map:
+            QMessageBox.critical(self, "Ошибка", f"Метод '{method}' не реализован.")
+            return
 
         try:
-            if method == "mean":
-                if series.dtype not in ['int64', 'float64']:
-                    raise ValueError("Среднее применимо только к числовым колонкам")
-                value = series.mean()
-                self.df[col] = series.fillna(value)
-                self.log_action(f"Заполнено средним: {value:.4f}")
+            old_missing = self.df[col].isnull().sum()
+            self.df, description = method_map[method](self.df.copy(), col, parent=self)
+            new_missing = self.df[col].isnull().sum()
 
-            elif method == "median":
-                if series.dtype not in ['int64', 'float64']:
-                    raise ValueError("Медиана применима только к числовым колонкам")
-                value = series.median()
-                self.df[col] = series.fillna(value)
-                self.log_action(f"Заполнено медианой: {value:.4f}")
+            method_name = {
+                "mean": "среднего",
+                "median": "медианы",
+                "mode": "моды",
+                "interpolate": "интерполяции",
+                "knn": "KNN",
+                "mice": "MICE",
+                "hot_deck": "Hot Deck",
+                "em": "EM"
+            }.get(method, method)
 
-            elif method == "mode":
-                value = series.mode()
-                if value.empty:
-                    value = series.dropna().iloc[0] if not series.dropna().empty else "Unknown"
-                else:
-                    value = value[0]
-                self.df[col] = series.fillna(value)
-                self.log_action(f"Заполнено модой: {value}")
+            filled = old_missing - new_missing
+            change_text = f"пропуски в '{col}' заполнены методом {method_name} ({filled})"
+            self._pending_changes.append(change_text)
+            self.btn_save.setEnabled(True)
 
-            elif method == "interpolate":
-                if series.dtype not in ['int64', 'float64']:
-                    raise ValueError("Интерполяция доступна только для числовых колонок")
-                self.df[col] = series.interpolate(method='linear', limit_direction='both')
-                self.log_action("Интерполяция (линейная)")
-
-            elif method == "knn":
-                self.show_not_implemented("KNN-Imputer требует нормализации и установки kneighbors. Доступно в расширенной версии.")
-            elif method == "mice":
-                self.show_not_implemented("MICE — сложный метод. Реализация в разработке.")
-            elif method == "hot_deck":
-                self.show_not_implemented("Hot Deck — в разработке.")
-            elif method == "em":
-                self.show_not_implemented("EM — требует предположений о распределении. В разработке.")
-
-            QMessageBox.information(self, "Успех", f"Пропуски в '{col}' восстановлены методом: {method}")
+            QMessageBox.information(self, "Успех", f"Пропуски восстановлены:\n{description}")
             self.show_missing_values()
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось восстановить:\n{e}")
 
-    def log_action(self, message):
-        print(f"[Imputation] {message}")
-
-    def show_not_implemented(self, msg):
-        QMessageBox.information(self, "В разработке", msg)
+    def update_history_display(self):
+        """Обновляет отображение истории"""
+        self.history_list.clear()
+        for ver in sorted(self._meta_data.keys(), key=lambda x: int(x[1:])):
+            item = QListWidgetItem(f"{ver} – {self._meta_data[ver]}")
+            self.history_list.addItem(item)
 
     def save_dataset(self):
-        """Сохраняет обновлённый датасет"""
+        """Сохранение с обновлением истории"""
         if self.df is None or self.selected_file_path is None:
             QMessageBox.warning(self, "Ошибка", "Нет данных для сохранения!")
             return
 
+        # Извлекаем базовое имя
         file_name = os.path.splitext(os.path.basename(self.selected_file_path))[0]
-        suggested_name = f"dataset/{file_name}_cleaned.csv"
-        save_path, _ = QFileDialog.getSaveFileName(
-            self, "Сохранить датасет", suggested_name, "CSV Files (*.csv)"
-        )
-        if not save_path:
-            return
+        base_name = file_name.split("_v")[0] if "_v" in file_name else file_name
+        save_path = os.path.join("dataset", f"{base_name}_v{self._version}.csv")
 
         try:
-            self.df.to_csv(save_path, index=False)
-            QMessageBox.information(self, "Сохранено", f"Датасет сохранён:\n{save_path}")
+            # Добавляем новые изменения
+            current_version = f"v{self._version}"
+            if self._pending_changes:
+                self._meta_data[current_version] = ", ".join(self._pending_changes)
+            else:
+                if current_version not in self._meta_data:
+                    self._meta_data[current_version] = "без изменений"
+
+            # Формируем строку: v0|v1 изменение1|v2 изменение2
+            parts = []
+            for ver in sorted(self._meta_data.keys(), key=lambda x: int(x[1:])):
+                changes = self._meta_data[ver]
+                parts.append(f"{ver} {changes}")
+            full_content = "|".join(parts)
+            full_line = f"# META: {full_content}"
+
+            # Разбиваем на строки по 150 символов
+            max_len = 150
+            meta_lines = []
+            if len(full_line) <= max_len:
+                meta_lines.append(full_line)
+            else:
+                words = full_content.split("|")
+                current = "# META:"
+                for word in words:
+                    test = current + ("|" if current != "# META:" else " ") + word
+                    if len(test) <= max_len:
+                        if current == "# META:":
+                            current = f"# META: {word}"
+                        else:
+                            current += "|" + word
+                    else:
+                        if current != "# META:":
+                            meta_lines.append(current)
+                        current = f"# META: {word}"
+                if current != "# META:":
+                    meta_lines.append(current)
+
+            # Записываем
+            with open(save_path, "w", encoding="utf-8") as f:
+                for line in meta_lines:
+                    f.write(line + "\n")
+                self.df.to_csv(f, index=False)
+
+            # Обновляем состояние
+            self._pending_changes.clear()
+            self.selected_file_path = save_path
+            self._version += 1
+            self.btn_save.setEnabled(False)
+
+            # Обновляем историю в интерфейсе
+            self.update_history_display()
+            self.label_detail.setText("Последнее изменение сохранено.")
+
+            QMessageBox.information(
+                self, "Сохранено",
+                f"Датасет сохранён:\n{os.path.basename(save_path)}\n\n"
+                f"Теперь версия: v{self._version - 1}"
+            )
+
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить файл:\n{e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить:\n{e}")

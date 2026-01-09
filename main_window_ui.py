@@ -1,105 +1,120 @@
 # training_window.py
 import sys
-from PySide6.QtWidgets import QApplication, QWidget, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import (
+    QApplication, QWidget, QPushButton, QVBoxLayout, QGroupBox
+)
+
 # === Импорт всех модулей ===
 from preprocessing.dataset_processing_check_nan import MissingValuesDialog
 from preprocessing.dataset_processing_fix_non_numeric_ui import OneHotEncodingWindow
 from preprocessing.correlation_graph_ui import CorrelationGraphUI
 from preprocessing.data_balancing.data_balancing_method_ui import DataBalancingApp
-from preprocessing.outlier_categories_ui import OutlierCategoriesApp
 from researching_models.check_models_ui import ClassificationApp
 from selection_of_parameters.selection_parameters_main_menu_ui import MainWindow_selection_parameters
 from inference_models.inference_trained_models import SurveyForm
-from load_dataset_ui import LoadDatasetWindow
 from splitting_dataset_ui import SplittingDatasetWindow
 from checking_data_formats_ui import CheckingDataFormatsWindow
 from preprocessing.imputation_by_model_ui import ImputationByModelApp
 from preprocessing.hashing_methods_ui import HashingMethodsWindow
 
-# === Глобальные ссылки на окна (чтобы не открывалось несколько раз) ===
-processing_window_instance = None
+# === Глобальные ссылки на окна ===
+missing_values_window_instance = None
+onehot_window_instance = None
 correlation_graph_instance = None
 data_balancing_smote_instance = None
 classification_app_instance = None
 selection_of_parameters_instance = None
 inference_trained_models_instance = None
-load_dataset_window_instance = None
 splitting_dataset_window_instance = None
 checking_data_formats_window_instance = None
-outlier_categories_instance = None
 imputation_model_instance = None
-hashing_methods_instance = None 
+hashing_methods_instance = None
+
 
 class TrainingWindow(QWidget):
     def __init__(self):
         super().__init__()
-
-        # Заголовок окна
         self.setWindowTitle("Обучение модели")
-        # Минимальные размеры окна
-        self.setMinimumSize(400, 300)
-        # Начальное отображение окна с определённым размером
-        self.resize(300, 400)
+        self.resize(380, 580)
+        self.setMinimumSize(380, 500)
 
-        # === Кнопки ===
-        btn_load_dataset = QPushButton("📥 Загрузка датасета извне в приложение")
-        btn_load_dataset.clicked.connect(self.open_load_dataset)
+        main_layout = QVBoxLayout()
+        main_layout.setSpacing(12)
+        main_layout.setContentsMargins(10, 10, 10, 10)
 
-        btn_check_formats = QPushButton("🔍 Проверка форматов данных")
+        # === 1. Предобработка данных ===
+        preprocessing_group = QGroupBox("🧹 Предобработка данных")
+        preprocessing_layout = QVBoxLayout()
+
+        btn_check_formats = QPushButton("🔍 Загрузка и анализ датасета")
         btn_check_formats.clicked.connect(self.open_checking_data_formats)
+        preprocessing_layout.addWidget(btn_check_formats)
 
-        btn_process_nan_value = QPushButton("Удаление пропущенных значений")
+        btn_process_nan_value = QPushButton("Обработка пропущенных значений")
         btn_process_nan_value.clicked.connect(self.deleteNanValue)
-
-        btn_outlier_categories = QPushButton("🔍 Анализ редких классов")
-        btn_outlier_categories.clicked.connect(self.open_outlier_categories)
-
-        btn_split_dataset = QPushButton("✂️ Разделение датасета")
-        btn_split_dataset.clicked.connect(self.open_splitting_dataset)
+        preprocessing_layout.addWidget(btn_process_nan_value)
 
         btn_hashing_methods = QPushButton("🔏 Хеширование строковых классов")
         btn_hashing_methods.clicked.connect(self.open_hashing_methods)
+        preprocessing_layout.addWidget(btn_hashing_methods)
 
         btn_process_fix_non_numeric = QPushButton("🛠️ Обработка нечисловых значений")
         btn_process_fix_non_numeric.clicked.connect(self.fixNonNumericValue)
-
-        btn_correlation_plot = QPushButton("Корреляция параметров (график)")
-        btn_correlation_plot.clicked.connect(self.openCorrelationGraph)
+        preprocessing_layout.addWidget(btn_process_fix_non_numeric)
 
         btn_edit_dataset = QPushButton("Редактирование датасета (SMOTE, TRIM)")
         btn_edit_dataset.clicked.connect(self.openDataBalancingSmote)
+        preprocessing_layout.addWidget(btn_edit_dataset)
+
+        preprocessing_group.setLayout(preprocessing_layout)
+        main_layout.addWidget(preprocessing_group)
+
+        # === 2. Анализ и визуализация ===
+        analysis_group = QGroupBox("🔍 Анализ и визуализация")
+        analysis_layout = QVBoxLayout()
+
+        btn_correlation_plot = QPushButton("Корреляция параметров (график)")
+        btn_correlation_plot.clicked.connect(self.openCorrelationGraph)
+        analysis_layout.addWidget(btn_correlation_plot)
+
+        analysis_group.setLayout(analysis_layout)
+        main_layout.addWidget(analysis_group)
+
+        # === 3. Разделение и восстановление ===
+        engineering_group = QGroupBox("⚙️ Разделение и восстановление")
+        engineering_layout = QVBoxLayout()
+
+        btn_split_dataset = QPushButton("✂️ Разделение датасета")
+        btn_split_dataset.clicked.connect(self.open_splitting_dataset)
+        engineering_layout.addWidget(btn_split_dataset)
+
+        btn_impute_model = QPushButton("🔧 Восстановить значения моделью")
+        btn_impute_model.clicked.connect(self.open_impute_by_model)
+        engineering_layout.addWidget(btn_impute_model)
+
+        engineering_group.setLayout(engineering_layout)
+        main_layout.addWidget(engineering_group)
+
+        # === 4. Моделирование и инференс ===
+        modeling_group = QGroupBox("🧠 Моделирование и инференс")
+        modeling_layout = QVBoxLayout()
 
         btn_model_selection = QPushButton("Оценка и выбор модели")
         btn_model_selection.clicked.connect(self.open_classification_app)
+        modeling_layout.addWidget(btn_model_selection)
 
         btn_hyperparameters_tuning = QPushButton("Подбор параметров для модели и обучение")
         btn_hyperparameters_tuning.clicked.connect(self.openHyperParametersTuning)
-        
-        btn_impute_model = QPushButton("🔧 Восстановить значения моделью")
-        btn_impute_model.clicked.connect(self.open_impute_by_model)        
+        modeling_layout.addWidget(btn_hyperparameters_tuning)
 
         btn_inference_models = QPushButton("Инференс модели")
         btn_inference_models.clicked.connect(self.openInferenceTrainedModels)
+        modeling_layout.addWidget(btn_inference_models)
 
-        # === Макет ===
-        layout = QVBoxLayout()
-        layout.addWidget(btn_load_dataset)
-        layout.addWidget(btn_check_formats)
-        layout.addWidget(btn_process_nan_value)
-        layout.addWidget(btn_outlier_categories)
-        layout.addWidget(btn_split_dataset)
-        layout.addWidget(btn_hashing_methods)          # ✅ Кнопка вставлена ДО обработки
-        layout.addWidget(btn_process_fix_non_numeric)  # ✅ После идёт обработка нечисловых
-        layout.addWidget(btn_correlation_plot)
-        layout.addWidget(btn_edit_dataset)
-        layout.addWidget(btn_model_selection)
-        layout.addWidget(btn_hyperparameters_tuning)
-        layout.addWidget(btn_impute_model)
-        layout.addWidget(btn_inference_models)
+        modeling_group.setLayout(modeling_layout)
+        main_layout.addWidget(modeling_group)
 
-
-        # Устанавливаем макет
-        self.setLayout(layout)
+        self.setLayout(main_layout)
 
     # === Методы открытия окон ===
     def open_impute_by_model(self):
@@ -108,12 +123,6 @@ class TrainingWindow(QWidget):
             imputation_model_instance = ImputationByModelApp()
             imputation_model_instance.show()
 
-    def open_load_dataset(self):
-        global load_dataset_window_instance
-        if not load_dataset_window_instance or not load_dataset_window_instance.isVisible():
-            load_dataset_window_instance = LoadDatasetWindow()
-            load_dataset_window_instance.show()
-
     def open_checking_data_formats(self):
         global checking_data_formats_window_instance
         if not checking_data_formats_window_instance or not checking_data_formats_window_instance.isVisible():
@@ -121,16 +130,16 @@ class TrainingWindow(QWidget):
             checking_data_formats_window_instance.show()
 
     def deleteNanValue(self):
-        global processing_window_instance
-        if not processing_window_instance or not processing_window_instance.isVisible():
-            processing_window_instance = MissingValuesDialog()
-            processing_window_instance.show()
+        global missing_values_window_instance
+        if not missing_values_window_instance or not missing_values_window_instance.isVisible():
+            missing_values_window_instance = MissingValuesDialog()
+            missing_values_window_instance.show()
 
     def fixNonNumericValue(self):
-        global processing_window_instance
-        if not processing_window_instance or not processing_window_instance.isVisible():
-            processing_window_instance = OneHotEncodingWindow()
-            processing_window_instance.show()
+        global onehot_window_instance
+        if not onehot_window_instance or not onehot_window_instance.isVisible():
+            onehot_window_instance = OneHotEncodingWindow()
+            onehot_window_instance.show()
 
     def open_splitting_dataset(self):
         global splitting_dataset_window_instance
@@ -168,13 +177,6 @@ class TrainingWindow(QWidget):
             inference_trained_models_instance = SurveyForm()
             inference_trained_models_instance.show()
 
-    def open_outlier_categories(self):
-        global outlier_categories_instance
-        if not outlier_categories_instance or not outlier_categories_instance.isVisible():
-            outlier_categories_instance = OutlierCategoriesApp()
-            outlier_categories_instance.show()
-
-    # ✅ НОВЫЙ МЕТОД: Открытие окна хеширования строковых классов
     def open_hashing_methods(self):
         global hashing_methods_instance
         if not hashing_methods_instance or not hashing_methods_instance.isVisible():

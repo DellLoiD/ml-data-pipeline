@@ -1,7 +1,8 @@
-# splitting_dataset.py
+# preprocessing/splitting_dataset.py
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QPushButton, QLabel, QFileDialog, QMessageBox,
-    QScrollArea, QComboBox, QHBoxLayout, QFrame, QLineEdit
+    QScrollArea, QComboBox, QHBoxLayout, QFrame, QLineEdit,
+    QListWidget, QListWidgetItem, QGroupBox
 )
 from PySide6.QtCore import Qt
 import os
@@ -15,22 +16,17 @@ class SplittingDatasetWindow(QWidget):
         self.target_column = None
         self.complete_df = None  # где target НЕ NaN
         self.missing_df = None   # где target NaN
+        self.class_filtered_df = None
         self.df_path = None      # путь к исходному файлу
+        self._version = 1        # Следующая версия при сохранении
+        self._meta_data = {}     # {v1: "описание", v2: "описание"}
+        self._pending_changes = []  # Изменения до сохранения
         self.setup_ui()
 
     def setup_ui(self):
         layout = QVBoxLayout()
 
-        # === Заголовок ===
-        title = QLabel("Разделение датасета")
-        title.setStyleSheet("font-size: 16px; font-weight: bold;")
-        layout.addWidget(title)
-
-        desc = QLabel("Выберите датасет. Доступны два режима разделения:")
-        desc.setWordWrap(True)
-        layout.addWidget(desc)
-
-        # === Кнопка загрузки — СРАЗУ после описания ===
+        # === Кнопка загрузки — без заголовка ===
         self.load_btn = QPushButton("📂 Выбрать датасет из папки 'dataset'")
         self.load_btn.clicked.connect(self.load_dataset)
         self.load_btn.setStyleSheet("font-size: 14px; padding: 10px;")
@@ -141,12 +137,60 @@ class SplittingDatasetWindow(QWidget):
         self.save_class_btn.setEnabled(False)
         layout.addWidget(self.save_class_btn)
 
+        # === История изменений ===
+        history_group = QGroupBox("История изменений")
+        history_layout = QVBoxLayout()
+
+        self.history_list = QListWidget()
+        self.history_list.setStyleSheet("""
+            QListWidget {
+                font-family: 'Courier';
+                font-size: 12px;
+                background: #f8f8f8;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+            }
+            QListWidget::item {
+                padding: 4px;
+            }
+            QListWidget::item:selected {
+                background: #e0f0ff;
+                color: #000;
+            }
+        """)
+        self.history_list.setFixedHeight(120)
+        history_layout.addWidget(self.history_list)
+
+        self.label_detail = QLabel("Выберите версию, чтобы посмотреть изменения.")
+        self.label_detail.setWordWrap(True)
+        self.label_detail.setStyleSheet("font-size: 11px; color: #555;")
+        history_layout.addWidget(self.label_detail)
+
+        history_group.setLayout(history_layout)
+        layout.addWidget(history_group)
+
         # === Финал ===
         self.setLayout(layout)
         self.reset_state()
 
+        # Подключаем клик по истории
+        self.history_list.itemClicked.connect(self.on_history_item_clicked)
+
+    def on_history_item_clicked(self, item):
+        """Показывает детали выбранной версии"""
+        version = item.text().split(" ")[0]  # v1
+        changes = self._meta_data.get(version, "Информация недоступна")
+        self.label_detail.setText(f"🔸 {changes}")
+
+    def update_history_display(self):
+        """Обновляет список истории"""
+        self.history_list.clear()
+        for ver in sorted(self._meta_data.keys(), key=lambda x: int(x[1:])):
+            item = QListWidgetItem(f"{ver} – {self._meta_data[ver]}")
+            self.history_list.addItem(item)
+
     def add_section_separator(self, layout, text):
-        """Добавляет визуальный заголовок-разделитель в указанный layout"""
+        """Добавляет визуальный заголовок-разделитель"""
         label = QLabel(f"<b>{text}</b>")
         label.setStyleSheet("font-size: 14px; margin-top: 15px; margin-bottom: 5px;")
         layout.addWidget(label)
@@ -164,6 +208,10 @@ class SplittingDatasetWindow(QWidget):
         self.missing_df = None
         self.class_filtered_df = None
         self.df_path = None
+        self._version = 1
+        self._meta_data = {}
+        self._pending_changes = []
+
         self.info_label.setText("Датасет не загружен.")
         self.target_combo.clear()
         self.target_combo.setEnabled(False)
@@ -181,7 +229,6 @@ class SplittingDatasetWindow(QWidget):
         self.class_result_label.setText("")
         self.save_class_btn.setEnabled(False)
 
-        # Удаляем ссылки на виджеты
         if hasattr(self, 'from_edit'):
             delattr(self, 'from_edit')
         if hasattr(self, 'to_edit'):
@@ -197,7 +244,7 @@ class SplittingDatasetWindow(QWidget):
                 child.widget().deleteLater()
 
     def load_dataset(self):
-        """Загрузка CSV из папки dataset"""
+        """Загрузка CSV с учётом #META"""
         dataset_dir = "dataset"
         if not os.path.exists(dataset_dir):
             QMessageBox.critical(self, "Ошибка", f"Папка '{dataset_dir}' не найдена!")
@@ -210,7 +257,31 @@ class SplittingDatasetWindow(QWidget):
             return
 
         try:
-            self.df = pd.read_csv(file_path)
+            # Парсим # META: строки
+            with open(file_path, 'r', encoding='utf-8') as f:
+                meta_lines = []
+                for line in f:
+                    stripped = line.strip()
+                    if stripped.startswith("# META:"):
+                        meta_lines.append(stripped)
+                    elif stripped and not stripped.startswith("#"):
+                        break
+
+                self._meta_data = {}
+                for line in meta_lines:
+                    line = line.replace("# META:", "").strip()
+                    parts = line.split("|")
+                    for part in parts:
+                        part = part.strip()
+                        if part.startswith("v"):
+                            version_part = part.split(maxsplit=1)
+                            if len(version_part) == 2:
+                                ver = version_part[0]
+                                changes = version_part[1]
+                                self._meta_data[ver] = changes
+
+            # Читаем данные
+            self.df = pd.read_csv(file_path, comment='#', skipinitialspace=True)
             self.df_path = file_path
             filename = os.path.basename(file_path)
             rows, cols = self.df.shape
@@ -219,7 +290,6 @@ class SplittingDatasetWindow(QWidget):
                                     f"Размер: <b>{rows} строк × {cols} столбцов</b><br>"
                                     f"Общее количество пропусков: <b>{self.df.isnull().sum().sum()}</b>")
 
-            # Заполняем комбобоксы
             columns = list(self.df.columns)
             self.target_combo.clear()
             self.target_combo.addItems(columns)
@@ -234,6 +304,9 @@ class SplittingDatasetWindow(QWidget):
             self.class_combo.setCurrentIndex(0)
 
             self.split_btn.setEnabled(True)
+
+            # Обновляем историю в UI
+            self.update_history_display()
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить датасет:\n{str(e)}")
@@ -250,7 +323,7 @@ class SplittingDatasetWindow(QWidget):
         self.result_label.setText(f"<b>Статистика по столбцу '{column}':</b><br><br>"
                                   f"• Заполнено: <b>{not_missing_count}</b> строк<br>"
                                   f"• Пропущено: <b>{missing_count}</b> строк<br><br>"
-                                  f"Выберите 'Выполнить разделение', чтобы создать два набора.")
+                                  f"Нажмите 'Выполнить разделение'.")
 
         self.target_column = column
 
@@ -260,7 +333,6 @@ class SplittingDatasetWindow(QWidget):
         self.class_result_label.setText("")
         self.save_class_btn.setEnabled(False)
 
-        # ✅ Исправляем передачу строки вместо bool
         self.split_class_btn.setEnabled(column not in ["", "Выберите категорию"])
 
         if self.df is None or column == "Выберите категорию" or column not in self.df.columns:
@@ -271,10 +343,9 @@ class SplittingDatasetWindow(QWidget):
             self.type_label.setText("⚠️ Нет данных для анализа")
             return
 
-        # === Числовая колонка ===
         if pd.api.types.is_numeric_dtype(series):
             min_val, max_val = series.min(), series.max()
-            self.type_label.setText(f"Тип: числовая (int/float). Диапазон: от {min_val} до {max_val}")
+            self.type_label.setText(f"Тип: числовая. Диапазон: от {min_val} до {max_val}")
 
             row1 = QHBoxLayout()
             row1.addWidget(QLabel("Значение от:"))
@@ -290,9 +361,8 @@ class SplittingDatasetWindow(QWidget):
             row2.addWidget(self.to_edit)
             self.input_container.addLayout(row2)
 
-        # === Строковая колонка ===
         else:
-            self.type_label.setText("Тип: строка (str). Введите значения через запятую.")
+            self.type_label.setText("Тип: строка. Введите значения через запятую.")
             row = QHBoxLayout()
             row.addWidget(QLabel("Значения (через запятую):"))
             self.str_edit = QLineEdit()
@@ -302,13 +372,14 @@ class SplittingDatasetWindow(QWidget):
 
     def split_by_class(self):
         """Фильтрация по выбранной колонке"""
-        if self.df is None:  # ✅ так правильно
+        if self.df is None:
             return
         column = self.class_combo.currentText()
         if not column or column == "Выберите категорию":
-            QMessageBox.warning(self, "Предупреждение", "Выберите колонку для фильтрации!")
+            QMessageBox.warning(self, "Предупреждение", "Выберите колонку!")
             return
         series = self.df[column].dropna()
+
         if pd.api.types.is_numeric_dtype(series):
             try:
                 from_val = self.from_edit.text().strip()
@@ -320,18 +391,18 @@ class SplittingDatasetWindow(QWidget):
 
                 low = float(from_val)
 
-                # Если заполнено 'до' → диапазон
                 if to_val.strip():
                     high = float(to_val.strip())
                     if low > high:
-                        QMessageBox.warning(self, "Ошибка", "Значение 'от' больше 'до'.")
+                        QMessageBox.warning(self, "Ошибка", "'От' больше 'до'.")
                         return
                     mask = (self.df[column] >= low) & (self.df[column] <= high)
                     result_text = f"Найдено: <b>{mask.sum()}</b> строк ({low} ≤ x ≤ {high})"
+                    change_text = f"фильтрация по '{column}' от {low} до {high}"
                 else:
-                    # Только 'от' → точное совпадение
                     mask = self.df[column] == low
                     result_text = f"Найдено: <b>{mask.sum()}</b> строк (x = {low})"
+                    change_text = f"фильтрация по '{column}' = {low}"
 
             except ValueError:
                 QMessageBox.critical(self, "Ошибка", "Введите корректные числовые значения!")
@@ -342,27 +413,22 @@ class SplittingDatasetWindow(QWidget):
                 return
             str_vals = self.str_edit.text().strip()
             if not str_vals:
-                QMessageBox.warning(self, "Ошибка", "Введите хотя бы одно строковое значение!")
+                QMessageBox.warning(self, "Ошибка", "Введите строковые значения!")
                 return
             values = [v.strip() for v in str_vals.split(",") if v.strip()]
             mask = self.df[column].astype(str).isin(values)
             result_text = f"Найдено: <b>{mask.sum()}</b> строк (входит в {values})"
+            change_text = f"фильтрация по '{column}' в {values}"
 
         self.class_filtered_df = self.df[mask].copy()
         self.class_result_label.setText(f"<b>Фильтрация по '{column}'</b><br>{result_text}")
         self.save_class_btn.setEnabled(True)
-
-    def save_class_dataset(self):
-        """Сохранить отфильтрованный датасет"""
-        if self.class_filtered_df is None:
-            return
-        suffix = f"filtered_by_{self.class_combo.currentText()}.csv"
-        self.save_dataframe(self.class_filtered_df, suffix, "Отфильтрованный датасет")
+        self._pending_changes.append(change_text)
 
     def split_by_target(self):
         """Разделение по пропускам в целевой переменной"""
         if not self.target_column:
-            QMessageBox.warning(self, "Предупреждение", "Сначала выберите целевую переменную!")
+            QMessageBox.warning(self, "Предупреждение", "Выберите целевую переменную!")
             return
 
         try:
@@ -373,24 +439,16 @@ class SplittingDatasetWindow(QWidget):
             complete_count = len(self.complete_df)
             missing_count = len(self.missing_df)
 
-            missing_stats = self.missing_df.isnull().sum()
-            missing_cols_with_nan = missing_stats[missing_stats > 0]
+            change_text = f"разделён по пропускам в '{self.target_column}'"
+            self._pending_changes.append(change_text)
 
             result_text = f"""
             <b>Разделение по целевой переменной: '{self.target_column}'</b><br><br>
-            ✅ <b>Полный набор</b> (где '{self.target_column}' заполнена):<br>
-            &nbsp;&nbsp;• Строк: {complete_count} ({complete_count/total*100:.1f}%)<br><br>
-            
-            ⚠️ <b>Набор с пропущенной целевой переменной</b> (где '{self.target_column}' = NaN):<br>
-            &nbsp;&nbsp;• Строк: {missing_count} ({missing_count/total*100:.1f}%)<br>
+            ✅ <b>Полный набор</b> (заполнена):<br>
+            &nbsp;&nbsp;• {complete_count} строк ({complete_count/total*100:.1f}%)<br><br>
+            ⚠️ <b>Набор с пропущенной</b>:<br>
+            &nbsp;&nbsp;• {missing_count} строк ({missing_count/total*100:.1f}%)
             """
-
-            if len(missing_cols_with_nan) > 0:
-                result_text += "&nbsp;&nbsp;• Столбцы с пропусками:<br>"
-                for col, count in missing_cols_with_nan.items():
-                    result_text += f"&nbsp;&nbsp;&nbsp;&nbsp;• {col}: {count}<br>"
-            else:
-                result_text += "&nbsp;&nbsp;• Других пропусков нет<br>"
 
             self.result_label.setText(result_text)
             self.save_complete_btn.setEnabled(True)
@@ -400,22 +458,92 @@ class SplittingDatasetWindow(QWidget):
             QMessageBox.critical(self, "Ошибка", f"Ошибка при разделении:\n{str(e)}")
 
     def save_complete(self):
-        self.save_dataframe(self.complete_df, f"with_{self.target_column}_filled.csv",
-                            f"Полный набор (с заполненной '{self.target_column}')")
+        self.save_dataframe(self.complete_df, f"with_{self.target_column}_filled", "Полный набор")
 
     def save_with_missing(self):
-        self.save_dataframe(self.missing_df, f"with_{self.target_column}_missing.csv",
-                            f"Набор с пропущенной '{self.target_column}'")
+        self.save_dataframe(self.missing_df, f"with_{self.target_column}_missing", "Набор с пропусками")
+
+    def save_class_dataset(self):
+        """Сохранить отфильтрованный датасет"""
+        if self.class_filtered_df is None:
+            return
+        suffix = f"filtered_by_{self.class_combo.currentText()}"
+        self.save_dataframe(self.class_filtered_df, suffix, "Отфильтрованный датасет")
+
+    def get_next_version(self, base_path):
+        """Возвращает следующий номер версии и актуальный путь"""
+        if not os.path.exists(base_path + "_v1.csv"):
+            return 1, base_path + "_v1.csv"
+
+        version = 1
+        while os.path.exists(base_path + f"_v{version}.csv"):
+            version += 1
+        return version, base_path + f"_v{version}.csv"
 
     def save_dataframe(self, df, suffix, name):
-        """Сохранение DataFrame в папку dataset/split"""
+        """Сохранение DataFrame в папку dataset/split с версионированием и #META"""
         try:
             output_dir = "dataset/split"
             os.makedirs(output_dir, exist_ok=True)
 
             base_name = os.path.splitext(os.path.basename(self.df_path))[0] if self.df_path else "dataset"
-            filename = f"{output_dir}/{base_name}_{suffix}"
-            df.to_csv(filename, index=False)
-            QMessageBox.information(self, "Успех", f"{name} сохранён:\n{filename}")
+            base_path = os.path.join(output_dir, f"{base_name}_{suffix}")
+
+            version, save_path = self.get_next_version(base_path)
+
+            # Добавляем текущие изменения
+            current_version = f"v{version}"
+            if self._pending_changes:
+                self._meta_data[current_version] = ", ".join(self._pending_changes)
+            else:
+                if current_version not in self._meta_data:
+                    self._meta_data[current_version] = "без изменений"
+            self._pending_changes.clear()
+
+            # Формируем строку: v1 ...|v2 ...
+            parts = []
+            for ver in sorted(self._meta_data.keys(), key=lambda x: int(x[1:])):
+                changes = self._meta_data[ver]
+                parts.append(f"{ver} {changes}")
+            full_content = "|".join(parts)
+            full_line = f"# META: {full_content}"
+
+            # Разбиваем на строки по 150 символам
+            max_len = 150
+            meta_lines = []
+            if len(full_line) <= max_len:
+                meta_lines.append(full_line)
+            else:
+                words = full_content.split("|")
+                current = "# META:"
+                for word in words:
+                    test = current + ("|" if current != "# META:" else " ") + word
+                    if len(test) <= max_len:
+                        if current == "# META:":
+                            current = f"# META: {word}"
+                        else:
+                            current += "|" + word
+                    else:
+                        if current != "# META:":
+                            meta_lines.append(current)
+                        current = f"# META: {word}"
+                if current != "# META:":
+                    meta_lines.append(current)
+
+            # Записываем
+            with open(save_path, "w", encoding="utf-8") as f:
+                for line in meta_lines:
+                    f.write(line + "\n")
+                df.to_csv(f, index=False)
+
+            # Обновляем историю в интерфейсе
+            self.update_history_display()
+            self.label_detail.setText("Последнее изменение сохранено.")
+
+            QMessageBox.information(
+                self, "Сохранено",
+                f"{name} сохранён:\n{save_path}\n\nВерсия: v{version}"
+            )
+
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить файл:\n{str(e)}")

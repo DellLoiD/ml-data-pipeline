@@ -1,57 +1,89 @@
-# checking_data_formats_ui.py
+# preprocessing/checking_data_formats_ui.py
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QTableWidgetItem,
-    QFileDialog, QMessageBox, QComboBox, QFrame, QGroupBox
+    QFileDialog, QMessageBox, QComboBox, QFrame, QGroupBox, QTextEdit, QLineEdit, QInputDialog
 )
 from PySide6.QtCore import Qt
 import os
+import shutil
 import pandas as pd
 import numpy as np
-from datetime import datetime
 
 
 class CheckingDataFormatsWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.df = None
-        self._last_loaded_path = None  # Сохраняем путь для генерации имени
+        self._last_loaded_path = None
+        self._version = 1
+        self._meta_data = {}
+        self._pending_changes = []
+        self.param_descriptions = {}
         self.setup_ui()
 
     def setup_ui(self):
         self.setWindowTitle("Проверка форматов данных")
-        self.resize(800, 900)
+        self.resize(800, 600)  # Немного увеличена высота
 
         layout = QVBoxLayout()
 
-        # === Заголовок ===
         title = QLabel("Проверка форматов данных")
         title.setStyleSheet("font-size: 16px; font-weight: bold;")
         layout.addWidget(title)
 
-        # === Кнопка загрузки ===
-        self.load_btn = QPushButton("📂 Загрузить датасет из папки 'dataset'")
-        self.load_btn.clicked.connect(self.load_dataset)
-        self.load_btn.setStyleSheet("font-size: 14px; padding: 10px;")
-        layout.addWidget(self.load_btn)
+        # === Кнопки загрузки ===
+        buttons_layout = QHBoxLayout()
 
-        # === Общая информация ===
-        self.info_group = QGroupBox("Общая информация о датасете")
+        self.import_btn = QPushButton("📥 Загрузка датасета в проект")
+        self.import_btn.clicked.connect(self.import_dataset_to_project)
+        self.import_btn.setStyleSheet("font-size: 14px; padding: 8px;")
+        self.import_btn.setMinimumWidth(250)
+        buttons_layout.addWidget(self.import_btn)
+
+        self.load_btn = QPushButton("📂 Загрузить датасет из папки dataset")
+        self.load_btn.clicked.connect(self.load_dataset)
+        self.load_btn.setStyleSheet("font-size: 14px; padding: 8px;")
+        self.load_btn.setMinimumWidth(250)
+        buttons_layout.addWidget(self.load_btn)
+
+        self.load_desc_btn = QPushButton("📄 Загрузить описание (txt)")
+        self.load_desc_btn.clicked.connect(self.load_parameter_descriptions)
+        self.load_desc_btn.setStyleSheet("font-size: 13px; padding: 8px;")
+        self.load_desc_btn.setMinimumWidth(250)
+        buttons_layout.addWidget(self.load_desc_btn)
+
+        buttons_layout.addStretch()
+        layout.addLayout(buttons_layout)
+
+        # === Три группы в одной строке ===
+        top_row_layout = QHBoxLayout()
+
+        self.info_group = QGroupBox("Общая информация")
         info_layout = QVBoxLayout()
         self.info_label = QLabel("Датасет не загружен.")
         self.info_label.setWordWrap(True)
         info_layout.addWidget(self.info_label)
         self.info_group.setLayout(info_layout)
-        layout.addWidget(self.info_group)
+        top_row_layout.addWidget(self.info_group, 1)
 
-        # === Статистика по категориальным признакам ===
-        self.categories_group = QGroupBox("Категориальные признаки и количество классов")
+        self.categories_group = QGroupBox("Категориальные признаки")
         categories_layout = QVBoxLayout()
         self.categories_label = QLabel("Категориальные колонки не загружены.")
         self.categories_label.setWordWrap(True)
-        self.categories_label.setStyleSheet("font-family: monospace;")
+        self.categories_label.setStyleSheet("font-family: monospace; font-size: 12px;")
         categories_layout.addWidget(self.categories_label)
         self.categories_group.setLayout(categories_layout)
-        layout.addWidget(self.categories_group)
+        top_row_layout.addWidget(self.categories_group, 1)
+
+        self.missing_group = QGroupBox("Пропуски")
+        missing_layout = QVBoxLayout()
+        self.missing_label_summary = QLabel("Пропуски не рассчитаны.")
+        self.missing_label_summary.setWordWrap(True)
+        missing_layout.addWidget(self.missing_label_summary)
+        self.missing_group.setLayout(missing_layout)
+        top_row_layout.addWidget(self.missing_group, 1)
+
+        layout.addLayout(top_row_layout)
 
         # === Разделитель ===
         line1 = QFrame()
@@ -59,62 +91,88 @@ class CheckingDataFormatsWindow(QWidget):
         line1.setFrameShadow(QFrame.Sunken)
         layout.addWidget(line1)
 
-        # === Выбор колонки ===
-        col_layout = QHBoxLayout()
-        col_layout.addWidget(QLabel("Выберите колонку:"))
+        # === Объединённая строка: выбор и действия ===
+        control_layout = QHBoxLayout()
+        control_layout.addWidget(QLabel("Выберите колонку:"))
+
         self.column_combo = QComboBox()
-        self.column_combo.currentTextChanged.connect(self.on_column_selected)
+        self.column_combo.addItem("Выберите колонку")
         self.column_combo.setEnabled(False)
-        col_layout.addWidget(self.column_combo)
-        layout.addLayout(col_layout)
+        self.column_combo.setFixedWidth(180)
+        control_layout.addWidget(self.column_combo)
 
-        # === Кнопки анализа и удаления ===
-        btn_layout = QHBoxLayout()
+        self.analyze_btn = QPushButton("Найти классы по параметру")
+        self.analyze_btn.setToolTip("Анализ редких значений (≤ N)")
+        self.analyze_btn.clicked.connect(self.analyze_rare_classes)
+        self.analyze_btn.setEnabled(False)
+        self.analyze_btn.setFixedWidth(170)
+        control_layout.addWidget(self.analyze_btn)
 
-        self.freq_btn = QPushButton("📊 Показать частоту классов")
-        self.freq_btn.clicked.connect(self.show_category_frequency)
-        self.freq_btn.setEnabled(False)
-        self.freq_btn.setStyleSheet("font-size: 13px;")
-        btn_layout.addWidget(self.freq_btn)
+        self.merge_btn = QPushButton("🔗 Объединить классы.")
+        self.merge_btn.setToolTip("Объединить значения в диапазоне")
+        self.merge_btn.clicked.connect(self.merge_interval_values)
+        self.merge_btn.setEnabled(False)
+        self.merge_btn.setFixedWidth(150)
+        control_layout.addWidget(self.merge_btn)
 
         self.delete_btn = QPushButton("🗑️ Удалить колонку")
+        self.delete_btn.setToolTip("Удалить выбранную колонку")
+        self.delete_btn.setStyleSheet("color: red; font-weight: bold;")
         self.delete_btn.clicked.connect(self.delete_selected_column)
         self.delete_btn.setEnabled(False)
-        self.delete_btn.setStyleSheet("font-size: 13px; color: red;")
-        btn_layout.addWidget(self.delete_btn)
+        self.delete_btn.setFixedWidth(130)
+        control_layout.addWidget(self.delete_btn)
 
-        layout.addLayout(btn_layout)
+        control_layout.addStretch()
+        layout.addLayout(control_layout)
 
-        # === Результат анализа ===
-        self.result_group = QGroupBox("Анализ выбранной колонки")
-        result_layout = QVBoxLayout()
+        # === Описание выбранной колонки ===
+        self.description_label = QLabel("Описание: не загружено или отсутствует.")
+        self.description_label.setWordWrap(True)
+        self.description_label.setStyleSheet("font-style: italic; color: #555; padding: 4px;")
+        layout.addWidget(self.description_label)
 
-        self.missing_label = QLabel("Пропуски не анализировались.")
-        result_layout.addWidget(self.missing_label)
+        # === Анализ редких классов ===
+        outlier_group = QGroupBox("Редкие значения (≤ N)")
+        outlier_layout = QVBoxLayout()
 
-        self.format_label = QLabel("Форматы не определены.")
-        result_layout.addWidget(self.format_label)
+        # Фильтр по интервалу
+        range_layout = QHBoxLayout()
+        range_layout.addWidget(QLabel("Фильтр (от):"))
+        self.min_val_input = QLineEdit()
+        self.min_val_input.setPlaceholderText("мин, напр. 1800")
+        self.min_val_input.setFixedWidth(90)
+        self.min_val_input.setEnabled(False)
+        range_layout.addWidget(self.min_val_input)
 
-        self.examples_label = QLabel("Примеры значений по форматам:")
-        result_layout.addWidget(self.examples_label)
+        range_layout.addWidget(QLabel("до:"))
+        self.max_val_input = QLineEdit()
+        self.max_val_input.setPlaceholderText("макс, напр. 1950")
+        self.max_val_input.setFixedWidth(90)
+        self.max_val_input.setEnabled(False)
+        range_layout.addWidget(self.max_val_input)
+        outlier_layout.addLayout(range_layout)
 
-        from PySide6.QtWidgets import QTableWidget
-        self.examples_table = QTableWidget()
-        self.examples_table.setColumnCount(2)
-        self.examples_table.setHorizontalHeaderLabels(["Формат", "Примеры (до 5)"])
-        self.examples_table.horizontalHeader().setStretchLastSection(True)
-        result_layout.addWidget(self.examples_table)
+        # Поле N
+        n_layout = QHBoxLayout()
+        n_layout.addWidget(QLabel("Макс. записей (N):"))
+        self.n_input = QLineEdit("5")
+        self.n_input.setPlaceholderText("Напр.: 5")
+        self.n_input.setFixedWidth(90)
+        n_layout.addWidget(self.n_input)
+        outlier_layout.addLayout(n_layout)
 
-        self.result_group.setLayout(result_layout)
-        layout.addWidget(self.result_group)
+        # Результаты
+        self.results_text = QTextEdit()
+        self.results_text.setReadOnly(True)
+        self.results_text.setPlaceholderText("Результаты анализа...")
+        self.results_text.setFixedHeight(220)  # Увеличено на ~4 строки
+        outlier_layout.addWidget(self.results_text)
 
-        # === Кнопка анализа вручную (резерв) ===
-        self.analyze_btn = QPushButton("🔍 Повторно проанализировать колонку")
-        self.analyze_btn.clicked.connect(self.analyze_current_column)
-        self.analyze_btn.setEnabled(False)
-        layout.addWidget(self.analyze_btn)
+        outlier_group.setLayout(outlier_layout)
+        layout.addWidget(outlier_group)
 
-        # === Кнопка сохранения (внизу) ===
+        # === Кнопка сохранения ===
         self.save_btn = QPushButton("💾 Сохранить датасет")
         self.save_btn.clicked.connect(self.save_dataset)
         self.save_btn.setEnabled(False)
@@ -125,23 +183,94 @@ class CheckingDataFormatsWindow(QWidget):
         self.reset_state()
 
     def reset_state(self):
-        """Сброс состояния интерфейса"""
         self.df = None
         self._last_loaded_path = None
+        self._version = 1
+        self._meta_data = {}
+        self._pending_changes = []
+        self.param_descriptions = {}
+
         self.column_combo.clear()
+        self.column_combo.addItem("Выберите колонку")
         self.column_combo.setEnabled(False)
-        self.freq_btn.setEnabled(False)
         self.delete_btn.setEnabled(False)
-        self.save_btn.setEnabled(False)
-        self.info_label.setText("Датасет не загружен.")
-        self.missing_label.setText("Пропуски не анализировались.")
-        self.format_label.setText("Форматы не определены.")
-        self.examples_table.setRowCount(0)
         self.analyze_btn.setEnabled(False)
+        self.merge_btn.setEnabled(False)
+        self.save_btn.setEnabled(False)
+
+        self.min_val_input.clear()
+        self.max_val_input.clear()
+        self.n_input.setText("5")
+        self.results_text.clear()
+        self.description_label.setText("Описание: не загружено или отсутствует.")
+
+        self.info_label.setText("Датасет не загружен.")
         self.categories_label.setText("Категориальные колонки не загружены.")
+        self.missing_label_summary.setText("Пропуски не рассчитаны.")
+        self.load_btn.setText("📂 Загрузить датасет из папки dataset")
+
+    def import_dataset_to_project(self):
+        """Загружает датасет из любого места на ПК в папку dataset с именем _v0"""
+        dataset_dir = "dataset"
+        os.makedirs(dataset_dir, exist_ok=True)
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Выберите датасет для импорта", "", "CSV Files (*.csv);;All Files (*)"
+        )
+        if not file_path:
+            return
+
+        try:
+            df = pd.read_csv(file_path)
+            original_name = os.path.splitext(os.path.basename(file_path))[0]
+            safe_name = "".join(c for c in original_name if c.isalnum() or c in " _-")
+            new_filename = f"{safe_name}_v0.csv"
+            save_path = os.path.join(dataset_dir, new_filename)
+
+            with open(save_path, "w", encoding="utf-8") as f:
+                f.write("# META: v0 без изменений\n")
+                df.to_csv(f, index=False, encoding="utf-8", lineterminator="\n")
+
+            QMessageBox.information(
+                self, "Успех",
+                f"✅ Датасет импортирован в проект:\n{new_filename}\n\nТеперь его можно загрузить из папки dataset."
+            )
+
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось импортировать датасет:\n{e}")
+
+    def load_parameter_descriptions(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Выберите файл описаний", "", "Text Files (*.txt);;All Files (*)"
+        )
+        if not file_path:
+            return
+
+        try:
+            self.param_descriptions = {}
+            with open(file_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or ":" not in line:
+                        continue
+                    key, *desc_parts = line.split(":", 1)
+                    description = desc_parts[0].strip() if desc_parts else ""
+                    key = key.strip()
+                    self.param_descriptions[key] = description
+
+            QMessageBox.information(self, "Успех", f"✅ Описания загружены:\n{os.path.basename(file_path)}\n"
+                                                  f"Найдено параметров: {len(self.param_descriptions)}")
+
+            current_col = self.column_combo.currentText()
+            if current_col != "Выберите колонку" and current_col in self.param_descriptions:
+                self.description_label.setText(f"<b>{current_col}:</b> {self.param_descriptions[current_col]}")
+            else:
+                self.description_label.setText("Описание: не найдено.")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось прочитать файл описаний:\n{e}")
 
     def load_dataset(self):
-        """Загрузка CSV из папки dataset"""
         dataset_dir = "dataset"
         if not os.path.exists(dataset_dir):
             QMessageBox.critical(self, "Ошибка", f"Папка '{dataset_dir}' не найдена!")
@@ -154,343 +283,409 @@ class CheckingDataFormatsWindow(QWidget):
             return
 
         try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                meta_lines = []
+                for line in f:
+                    stripped = line.strip()
+                    if stripped.startswith("# META:"):
+                        meta_lines.append(stripped)
+                    elif stripped and not stripped.startswith("#"):
+                        break
+
+            self._meta_data = {}
+            for line in meta_lines:
+                line = line.replace("# META:", "").strip()
+                parts = line.split("|")
+                for part in parts:
+                    part = part.strip()
+                    if part.startswith("v"):
+                        version_part = part.split(maxsplit=1)
+                        if len(version_part) == 2:
+                            ver = version_part[0]
+                            changes = version_part[1]
+                            self._meta_data[ver] = changes
+
             self.df = pd.read_csv(
                 file_path,
                 na_values=['', 'NA', 'N/A', 'NULL', '?', 'none', 'null', '.', ' '],
-                skipinitialspace=True
+                skipinitialspace=True,
+                comment='#'
             )
             self._last_loaded_path = file_path
-            filename = os.path.basename(file_path)
-            rows, cols = self.df.shape
 
-            # Анализ типов
+            filename = os.path.basename(file_path)
+            name, ext = os.path.splitext(filename)
+            if "_v" in name:
+                try:
+                    self._version = int(name.split("_v")[1]) + 1
+                except:
+                    self._version = 1
+            else:
+                self._version = 1
+
+            rows, cols = self.df.shape
+            total_missing = self.df.isnull().sum().sum()
+
             numeric_cols = self.df.select_dtypes(include=[np.number]).columns.tolist()
             date_cols = self.detect_date_columns()
             categorical_cols = self.df.select_dtypes(include=['object']).columns.tolist()
             bool_cols = self.df.select_dtypes(include=['bool']).columns.tolist()
-            categorical_without_dates_and_bools = [col for col in categorical_cols if col not in date_cols + bool_cols]
+            categorical_without_dates_and_bools = [
+                col for col in categorical_cols if col not in date_cols + bool_cols
+            ]
 
-            # Только истинно строковые категориальные
             true_categorical = []
             for col in categorical_without_dates_and_bools:
                 sample = self.df[col].dropna().astype(str).head(100)
                 if not pd.to_numeric(sample, errors='coerce').notna().all():
                     true_categorical.append(col)
 
-            # === Общая информация ===
+            cat_counts = []
+            for col in true_categorical:
+                unique_count = self.df[col].dropna().astype(str).nunique()
+                cat_counts.append((col, unique_count))
+            cat_counts.sort(key=lambda x: x[1])
+
             type_info = []
             if numeric_cols:
-                cols_str = ', '.join(numeric_cols)
-                type_info.append(f"🔢 Числовые: {len(numeric_cols)} ({cols_str})")
+                type_info.append(f"🔢 Числовые: {len(numeric_cols)}")
             if date_cols:
-                cols_str = ', '.join(date_cols)
-                type_info.append(f"📅 Даты: {len(date_cols)} ({cols_str})")
+                type_info.append(f"📅 Даты: {len(date_cols)}")
             if true_categorical:
-                cols_str = ', '.join(true_categorical)
-                type_info.append(f"🔤 Категориальные: {len(true_categorical)} ({cols_str})")
+                type_info.append(f"🔤 Категориальные: {len(true_categorical)}")
             if bool_cols:
-                cols_str = ', '.join(bool_cols)
-                type_info.append(f"✅ Булевы: {len(bool_cols)} ({cols_str})")
+                type_info.append(f"✅ Булевы: {len(bool_cols)}")
 
+            # Теперь в столбик
             info_text = f"""
-            <b>Загружен датасет:</b> {filename}<br><br>
-            <b>Размер:</b> {rows} строк × {cols} столбцов<br>
-            <b>Пропусков в датасете:</b> {self.df.isnull().sum().sum()}<br><br>
+            <b>Размер:</b> {rows}×{cols}<br>
+            <b>Пропусков:</b> {total_missing}<br><br>
             <b>Типы данных:</b><br>
             {'<br>'.join(type_info)}
             """
             self.info_label.setText(info_text)
 
-            # === Статистика категорий ===
-            self.update_categories_display()
+            self.update_categories_display(cat_counts)
+            self.update_missing_summary()
 
-            # === Заполнение комбобокса ===
             self.column_combo.clear()
+            self.column_combo.addItem("Выберите колонку")
             self.column_combo.addItems(self.df.columns)
+            self.column_combo.setCurrentText("Выберите колонку")
             self.column_combo.setEnabled(True)
-            self.freq_btn.setEnabled(True)
             self.delete_btn.setEnabled(True)
-            self.save_btn.setEnabled(True)
             self.analyze_btn.setEnabled(True)
+            self.merge_btn.setEnabled(True)
 
-            self.on_column_selected(self.column_combo.currentText())
+            self.column_combo.currentTextChanged.connect(self.on_column_changed)
+
+            self.load_btn.setText(f"✅ Загружен: {os.path.basename(file_path)}")
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить датасет:\n{str(e)}")
             self.reset_state()
 
-    def update_categories_display(self):
-        """Обновляет отображение категориальных признаков и число классов"""
-        if self.df is None:
-            self.categories_label.setText("Категориальные колонки не загружены.")
+    def on_column_changed(self, column_name):
+        """Показывает описание и автоматически запускает анализ при выборе колонки"""
+        if not column_name or column_name == "Выберите колонку":
+            self.description_label.setText("Описание: не загружено или отсутствует.")
             return
 
-        categorical_cols = self.df.select_dtypes(include=['object']).columns.tolist()
-        date_cols = self.detect_date_columns()
-        bool_cols = self.df.select_dtypes(include=['bool']).columns.tolist()
-        true_categorical = [col for col in categorical_cols
-                            if col not in date_cols + bool_cols
-                            and not self.is_numeric_series(self.df[col])]
-
-        if true_categorical:
-            cat_lines = []
-            for col in true_categorical:
-                unique_count = self.df[col].dropna().astype(str).nunique()
-                cat_lines.append(f"<b>{col:20}</b> — {unique_count} классов")
-            cat_text = "<br>".join(cat_lines)
+        if column_name in self.param_descriptions:
+            self.description_label.setText(f"<b>{column_name}:</b> {self.param_descriptions[column_name]}")
         else:
-            cat_text = "❌ Нет подходящих строковых категориальных колонок."
+            self.description_label.setText("Описание: не найдено.")
 
-        self.categories_label.setText(cat_text)
+        if self.df is not None and column_name in self.df.columns:
+            is_numeric = pd.api.types.is_numeric_dtype(self.df[column_name])
+            self.min_val_input.setEnabled(is_numeric)
+            self.max_val_input.setEnabled(is_numeric)
+            if not is_numeric:
+                self.min_val_input.clear()
+                self.max_val_input.clear()
 
-    def on_column_selected(self, column):
-        """Автоматический анализ при выборе колонки"""
-        if self.df is not None and column:
-            self.analyze_column(column)
+        # Автоматический анализ при выборе колонки
+        self.analyze_rare_classes()
+
+    def update_categories_display(self, cat_counts):
+        if not cat_counts:
+            self.categories_label.setText("❌ Нет строковых категориальных колонок.")
+            return
+        cat_lines = [f"<b>{col:20}</b> — {count}" for col, count in cat_counts]
+        self.categories_label.setText("<br>".join(cat_lines))
+
+    def update_missing_summary(self):
+        if self.df is None:
+            self.missing_label_summary.setText("Пропуски не рассчитаны.")
+            return
+
+        missing_data = self.df.isnull().sum()
+        missing_cols = missing_data[missing_data > 0].sort_values(ascending=False)
+
+        if missing_cols.empty:
+            self.missing_label_summary.setText("✅ Нет пропусков.")
+            return
+
+        lines = []
+        for col, count in missing_cols.items():
+            pct = count / len(self.df)
+            marker = " 🔴" if pct > 0.5 else ""
+            lines.append(f"<b>{col:12}</b> — {count:3} ({pct:.1%}){marker}")
+
+        text = "<br>".join(lines)
+        self.missing_label_summary.setText(text)
 
     def detect_date_columns(self):
-        """Поиск колонок с датами с поддержкой частых форматов"""
         candidates = []
-        date_formats = [
-            '%m/%d/%Y', '%m/%d/%y', '%d/%m/%Y', '%Y-%m-%d', '%d.%m.%Y', '%Y/%m/%d'
-        ]
-
+        date_formats = ['%m/%d/%Y', '%m/%d/%y', '%d/%m/%Y', '%Y-%m-%d', '%d.%m.%Y', '%Y/%m/%d']
         for col in self.df.select_dtypes(include=['object']).columns:
             sample = self.df[col].dropna().astype(str).head(10)
             if len(sample) == 0:
                 continue
-
-            valid_count = 0
-            for fmt in date_formats:
-                try:
-                    parsed = pd.to_datetime(sample, format=fmt, errors='coerce')
-                    valid_ratio = parsed.notna().mean()
-                    if valid_ratio > 0.8:
-                        valid_count += 1
-                except:
-                    continue
-
+            valid_count = sum(
+                pd.to_datetime(sample, format=fmt, errors='coerce').notna().mean() > 0.8
+                for fmt in date_formats
+            )
             if valid_count > 0:
                 candidates.append(col)
-
         return candidates
 
-    def is_numeric_series(self, series):
-        numeric_ratio = pd.to_numeric(series, errors='coerce').notna().mean()
-        return numeric_ratio > 0.9
-
-    def is_datetime_series(self, series):
-        if series.empty:
-            return False
-        date_formats = ['%m/%d/%Y', '%m/%d/%y', '%d/%m/%Y', '%Y-%m-%d', '%d.%m.%Y', '%Y/%m/%d']
-        sample = series.astype(str).head(20)
-        for fmt in date_formats:
-            try:
-                parsed = pd.to_datetime(sample, format=fmt, errors='coerce')
-                if parsed.notna().mean() > 0.8:
-                    return True
-            except:
-                continue
-        return False
-
-    def is_boolean_like(self, series):
-        bool_values = ['да', 'нет', 'yes', 'no', 'true', 'false', '1', '0', 'True', 'False']
-        lower_values = series.astype(str).str.lower()
-        match_ratio = lower_values.isin(bool_values).mean()
-        return match_ratio > 0.9
-
-    def analyze_column(self, column):
-        if self.df is None or column not in self.df.columns:
-            return
-
-        series = self.df[column]
-        non_null = series.dropna()
-
-        # === Пропуски ===
-        missing_count = series.isnull().sum()
-        total_count = len(series)
-        missing_ratio = missing_count / total_count
-        if missing_count > 0:
-            self.missing_label.setText(
-                f"<span style='color: red;'>⚠️ Пропуски: {missing_count} ({missing_ratio:.1%})</span>"
-            )
-        else:
-            self.missing_label.setText("✅ Нет пропусков")
-
-        # === Определяем формат ===
-        if len(non_null) == 0:
-            self.format_label.setText("⚠️ Все значения — пропуски")
-            self.examples_table.setRowCount(0)
-            return
-
-        unique_sample = non_null.astype(str).str.strip().unique()
-        if self.is_numeric_series(non_null):
-            fmt = "число (int/float)"
-        elif self.is_datetime_series(non_null):
-            fmt = "дата/время"
-        elif self.is_boolean_like(non_null):
-            fmt = "логическое (да/нет, true/false)"
-        elif len(unique_sample) <= 10:
-            fmt = "категория (мало уникальных)"
-        else:
-            fmt = "текст (строка)"
-
-        self.format_label.setText(f"Определённый формат: <b>{fmt}</b>")
-
-        # === Сбор примеров ===
-        formats = {}
-        if self.is_numeric_series(non_null):
-            nums = pd.to_numeric(non_null, errors='coerce').dropna()
-            unique_nums = pd.Series(nums).drop_duplicates().head(5).tolist()
-            formats["Число"] = unique_nums
-        if self.is_datetime_series(non_null):
-            dates = pd.to_datetime(non_null, errors='coerce').dropna()
-            unique_dates = pd.Series(dates).drop_duplicates().head(5)
-            date_strings = [d.strftime("%Y-%m-%d") for d in unique_dates if not pd.isna(d)]
-            formats["Дата"] = date_strings
-        if self.is_boolean_like(non_null):
-            bools = non_null.drop_duplicates().head(5).tolist()
-            formats["Логическое"] = bools
-        if fmt in ["категория (мало уникальных)", "текст (строка)"]:
-            unique_vals = non_null.drop_duplicates().head(5).tolist()
-            key = "Категория" if len(unique_sample) <= 10 else "Текст"
-            formats[key] = unique_vals
-
-        # === Заполняем таблицу ===
-        self.examples_table.setRowCount(len(formats))
-        for i, (fmt_name, examples) in enumerate(formats.items()):
-            self.examples_table.setItem(i, 0, QTableWidgetItem(fmt_name))
-            self.examples_table.setItem(i, 1, QTableWidgetItem(", ".join(map(str, examples))))
-
-    def analyze_current_column(self):
-        """Кнопка для ручного перезапуска анализа"""
-        col = self.column_combo.currentText()
-        if col:
-            self.analyze_column(col)
-
-    def show_category_frequency(self):
-        """Показывает статистику по частоте значений в категориальной колонке"""
-        column = self.column_combo.currentText()
-        if not column:
-            QMessageBox.warning(self, "Внимание", "Сначала выберите колонку!")
-            return
-        if self.df is None:
-            QMessageBox.warning(self, "Внимание", "Сначала загрузите датасет!")
-            return
-        if column not in self.df.columns:
-            QMessageBox.critical(self, "Ошибка", f"Колонка '{column}' не найдена.")
-            return
-
-        series = self.df[column]
-        non_null = series.dropna()
-
-        if self.is_numeric_series(non_null) or self.is_datetime_series(non_null):
-            QMessageBox.information(self, "Информация", "Эта колонка числовая или дата — не подходит для анализа категорий.")
-            return
-
-        value_counts = non_null.value_counts()
-        unique_count = len(value_counts)
-        top3 = value_counts.head(3)
-        min_freq = value_counts.min()
-        rare_classes_count = (value_counts == min_freq).sum()
-
-        msg = f"<b>📊 Статистика колонки '{column}'</b><br><br>"
-        msg += f"🔢 Всего уникальных классов: <b>{unique_count}</b><br><br>"
-        msg += "<b>🏆 Самые частые значения:</b><br>"
-        for val, count in top3.items():
-            msg += f"• {val} — <b>{count}</b><br>"
-        msg += f"<br><b>🔻 Классы с частотой {min_freq}:</b><br>"
-        msg += f"• Всего таких: <b>{rare_classes_count}</b><br>"
-
-        if rare_classes_count <= 10:
-            rare_values = value_counts[value_counts == min_freq].index.tolist()
-            msg += f"• Примеры: {', '.join(map(str, rare_values[:5]))}" + ("..." if len(rare_values) > 5 else "")
-
-        msg += "<br><br><b>💡 Рекомендации:</b><br>"
-        if unique_count <= 5:
-            msg += "✅ Подходит для <b>One-Hot Encoding</b>."
-        elif unique_count <= 50:
-            msg += "🟡 Лучше <b>Label Encoding</b> или <b>Target Encoding</b>."
-        else:
-            msg += "🔴 Рассмотрите <b>Label Encoding</b> или <b>хэширование</b>."
-
-        QMessageBox.information(self, "Частота классов", msg)
-
     def delete_selected_column(self):
-        """Удаляет выбранную колонку и обновляет интерфейс"""
         column = self.column_combo.currentText()
-        if not column:
-            QMessageBox.warning(self, "Ошибка", "Сначала выберите колонку для удаления.")
-            return
-        if self.df is None:
-            QMessageBox.warning(self, "Ошибка", "Датасет не загружен.")
+        if not column or self.df is None or column == "Выберите колонку":
+            QMessageBox.warning(self, "Ошибка", "Выберите колонку для удаления.")
             return
 
-        reply = QMessageBox.question(
-            self,
-            "Подтверждение удаления",
-            f"Удалить колонку '{column}'?\n\n"
-            "Это действие нельзя отменить.",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if reply == QMessageBox.No:
+        reply = QMessageBox.question(self, "Подтверждение", f"Удалить колонку '{column}'?")
+        if reply != QMessageBox.Yes:
             return
 
         try:
             self.df = self.df.drop(columns=[column]).copy()
-
-            # Обновляем интерфейс
+            self._pending_changes.append(f"удалена колонка '{column}'")
             self.column_combo.removeItem(self.column_combo.currentIndex())
-            self.update_categories_display()
-            self.reset_analysis_display()
 
-            if len(self.df.columns) > 0:
-                new_col = self.df.columns[0]
-                self.column_combo.setCurrentText(new_col)
-                self.on_column_selected(new_col)
-            else:
+            if len(self.df.columns) == 0:
                 self.reset_state()
-
-            QMessageBox.information(self, "Успех", f"✅ Колонка '{column}' удалена.")
+            else:
+                QMessageBox.information(self, "Успех", f"✅ Колонка '{column}' удалена.")
+                self.save_btn.setEnabled(True)
+                self.update_categories_display(self.get_categorical_counts())
+                self.update_missing_summary()
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось удалить колонку:\n{e}")
 
-    def save_dataset(self):
-        """Сохраняет текущий датасет в CSV-файл"""
-        if self.df is None or self.df.empty:
-            QMessageBox.warning(self, "Ошибка", "Нечего сохранять — датасет пуст или не загружен.")
+    def get_categorical_counts(self):
+        if self.df is None:
+            return []
+
+        categorical_cols = self.df.select_dtypes(include=['object']).columns.tolist()
+        date_cols = self.detect_date_columns()
+        bool_cols = self.df.select_dtypes(include=['bool']).columns.tolist()
+        categorical_without_dates_and_bools = [
+            col for col in categorical_cols if col not in date_cols + bool_cols
+        ]
+
+        true_categorical = []
+        for col in categorical_without_dates_and_bools:
+            sample = self.df[col].dropna().astype(str).head(100)
+            if not pd.to_numeric(sample, errors='coerce').notna().all():
+                true_categorical.append(col)
+
+        cat_counts = []
+        for col in true_categorical:
+            unique_count = self.df[col].dropna().astype(str).nunique()
+            cat_counts.append((col, unique_count))
+        cat_counts.sort(key=lambda x: x[1])
+        return cat_counts
+
+    def analyze_rare_classes(self):
+        """Поиск редких значений с фильтрацией по интервалу"""
+        if self.df is None:
+            QMessageBox.warning(self, "Ошибка", "Сначала загрузите датасет!")
             return
 
-        # Генерация имени по умолчанию
-        if self._last_loaded_path:
-            original_name = os.path.basename(self._last_loaded_path)
-            default_name = f"cleaned_{original_name}"
+        column_name = self.column_combo.currentText()
+        if not column_name or column_name not in self.df.columns:
+            return
+
+        is_numeric = pd.api.types.is_numeric_dtype(self.df[column_name])
+        min_val, max_val = None, None
+        use_range = False
+
+        if is_numeric:
+            min_text = self.min_val_input.text().strip()
+            max_text = self.max_val_input.text().strip()
+            if min_text or max_text:
+                try:
+                    min_val = float(min_text) if min_text else None
+                    max_val = float(max_text) if max_text else None
+                    use_range = True
+                except ValueError:
+                    return
+
+        if use_range and is_numeric:
+            mask = True
+            if min_val is not None:
+                mask &= (self.df[column_name] >= min_val)
+            if max_val is not None:
+                mask &= (self.df[column_name] <= max_val)
+            filtered_series = self.df[column_name][mask]
         else:
-            default_name = "cleaned_dataset.csv"
-
-        save_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Сохранить датасет",
-            f"./dataset/{default_name}",
-            "CSV Files (*.csv)"
-        )
-
-        if not save_path:
-            return  # Пользователь отменил
+            filtered_series = self.df[column_name]
 
         try:
-            self.df.to_csv(save_path, index=False)
-            QMessageBox.information(
-                self,
-                "Сохранено",
-                f"✅ Датасет успешно сохранён:\n{save_path}"
-            )
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить файл:\n{e}")
+            n = int(self.n_input.text().strip())
+            if n < 0:
+                return
+        except ValueError:
+            return
 
-    def reset_analysis_display(self):
-        """Сброс отображения анализа колонки"""
-        self.missing_label.setText("Пропуски не анализировались.")
-        self.format_label.setText("Форматы не определены.")
-        self.examples_table.setRowCount(0)
+        value_counts = filtered_series.value_counts(dropna=False).sort_index()
+        rare_values = value_counts[value_counts <= n]
+
+        total_filtered = len(filtered_series)
+        total_unique = len(value_counts)
+        summary_line = (f"📊 Сводка: • Записей: <b>{total_filtered}</b> • Уникальных: <b>{total_unique}</b> • "
+                        f"Мин/макс: <b>{value_counts.min() if len(value_counts) else 0}</b> / "
+                        f"<b>{value_counts.max() if len(value_counts) else 0}</b>")
+
+        if rare_values.empty:
+            result_text = f"✅ Нет значений ≤ {n}.<br><br><i>{summary_line}</i>"
+            if use_range:
+                result_text += f"<br><i>(в диапазоне от {min_val} до {max_val})</i>"
+        else:
+            count_rare = len(rare_values)
+            result_text = (f"🔍 <b>{count_rare}</b> редких значений (≤ {n}): {summary_line}"
+                           f"<pre>Значение → К-во</pre>\n"
+                           f"<pre>" + "-" * 30 + "</pre>\n")
+            for value, count in rare_values.items():
+                val_str = "(пусто)" if pd.isna(value) else str(value)
+                val_str = val_str.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                result_text += f"<pre>{val_str:<15} → {count:>6}</pre>\n"
+
+        self.results_text.setHtml(result_text)
+
+    def merge_interval_values(self):
+        """Объединяет значения в указанном интервале"""
+        if self.df is None:
+            QMessageBox.warning(self, "Ошибка", "Сначала загрузите датасет!")
+            return
+
+        column_name = self.column_combo.currentText()
+        if not column_name or column_name not in self.df.columns:
+            QMessageBox.warning(self, "Ошибка", "Выберите корректный столбец!")
+            return
+
+        if not pd.api.types.is_numeric_dtype(self.df[column_name]):
+            QMessageBox.warning(self, "Ошибка", f"Столбец '{column_name}' должен быть числовым.")
+            return
+
+        min_text = self.min_val_input.text().strip()
+        max_text = self.max_val_input.text().strip()
+
+        if not min_text or not max_text:
+            QMessageBox.warning(self, "Ошибка", "Введите оба значения: 'от' и 'до'.")
+            return
+
+        try:
+            min_val = float(min_text)
+            max_val = float(max_text)
+        except ValueError:
+            QMessageBox.warning(self, "Ошибка", "Введите корректные числа.")
+            return
+
+        if min_val > max_val:
+            QMessageBox.warning(self, "Ошибка", "'от' не может быть больше 'до'.")
+            return
+
+        target_val, ok = QInputDialog.getDouble(
+            self,
+            "Объединить значения",
+            f"В какое значение объединить все записи\nв диапазоне [{min_val}, {max_val}]?",
+            decimals=0 if self.df[column_name].dtype == 'int64' else 2,
+            value=min_val
+        )
+        if not ok:
+            return
+
+        if target_val < -1e10 or target_val > 1e10:
+            QMessageBox.warning(self, "Ошибка", "Значение вне допустимого диапазона.")
+            return
+
+        mask = (self.df[column_name] >= min_val) & (self.df[column_name] <= max_val)
+        count = mask.sum()
+        if count == 0:
+            QMessageBox.information(self, "Нет данных", "Нет записей в диапазоне.")
+            return
+
+        self.df.loc[mask, column_name] = target_val
+        self._pending_changes.append(f"объединены значения в '{column_name}' от {min_val} до {max_val} в {target_val}")
+        self.save_btn.setEnabled(True)
+
+        QMessageBox.information(
+            self, "Успешно", f"✅ {count} записей\nобъединены в значение: <b>{target_val}</b>"
+        )
+        self.analyze_rare_classes()
+
+    def save_dataset(self):
+        if self.df is None or self.df.empty:
+            QMessageBox.warning(self, "Ошибка", "Нечего сохранять.")
+            return
+
+        if not self._last_loaded_path:
+            QMessageBox.critical(self, "Ошибка", "Неизвестен путь загрузки.")
+            return
+
+        name, ext = os.path.splitext(os.path.basename(self._last_loaded_path))
+        base_name = name.split("_v")[0] if "_v" in name else name
+        new_filename = f"{base_name}_v{self._version}{ext}"
+        save_path = os.path.join("dataset", new_filename)
+
+        try:
+            current_version = f"v{self._version}"
+            if self._pending_changes:
+                self._meta_data[current_version] = ", ".join(self._pending_changes)
+            else:
+                if current_version not in self._meta_data:
+                    self._meta_data[current_version] = "без изменений"
+
+            parts = [f"{ver} {self._meta_data[ver]}" for ver in sorted(self._meta_data.keys(), key=lambda x: int(x[1:]))]
+            full_line = f"# META: {'|'.join(parts)}"
+
+            max_len = 150
+            meta_lines = []
+            current_line = "# META:"
+            for part in full_line.split("|"):
+                test_line = current_line + ("|" if current_line != "# META:" else " ") + part
+                if len(test_line) <= max_len:
+                    if current_line == "# META:":
+                        current_line = f"# META: {part}"
+                    else:
+                        current_line += "|" + part
+                else:
+                    if current_line != "# META:":
+                        meta_lines.append(current_line)
+                    current_line = f"# META: {part}"
+            if current_line != "# META:":
+                meta_lines.append(current_line)
+
+            with open(save_path, "w", encoding="utf-8") as f:
+                for line in meta_lines:
+                    f.write(line + "\n")
+                self.df.to_csv(f, index=False, encoding="utf-8", lineterminator="\n")
+
+            self._pending_changes.clear()
+            self._last_loaded_path = save_path
+            self._version += 1
+
+            QMessageBox.information(
+                self, "Сохранено",
+                f"✅ Датасет сохранён:\n{new_filename}\n\nВерсия: v{self._version - 1}"
+            )
+            self.save_btn.setEnabled(False)
+            self.update_missing_summary()
+
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить:\n{e}")
