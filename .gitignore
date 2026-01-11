@@ -41,6 +41,21 @@ ENV/
 .DS_Store
 Thumbs.db
 
+# Data and models (large/binary)
+dataset/
+trained_models/
+plots/
+accuracy_reports_tested_models/
+
+# === Plots and reports ===
+plots/
+figures/
+images/
+*.png
+*.jpg
+*.jpeg
+*.svg
+
 # Логи
 *.log
 logs/
