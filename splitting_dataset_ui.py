@@ -1,4 +1,4 @@
-# preprocessing/splitting_dataset.py
+#splitting_dataset.py
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QPushButton, QLabel, QFileDialog, QMessageBox,
     QScrollArea, QComboBox, QHBoxLayout, QFrame, QLineEdit,
@@ -7,6 +7,9 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 import os
 import pandas as pd
+
+# Импорт нового трекера
+from utils.meta_tracker import MetaTracker
 
 
 class SplittingDatasetWindow(QWidget):
@@ -18,9 +21,8 @@ class SplittingDatasetWindow(QWidget):
         self.missing_df = None   # где target NaN
         self.class_filtered_df = None
         self.df_path = None      # путь к исходному файлу
-        self._version = 1        # Следующая версия при сохранении
-        self._meta_data = {}     # {v1: "описание", v2: "описание"}
-        self._pending_changes = []  # Изменения до сохранения
+        self._last_loaded_path = None
+        self.meta_tracker = MetaTracker(max_line_length=150)  # Управление историей и версиями
         self.setup_ui()
 
     def setup_ui(self):
@@ -179,14 +181,14 @@ class SplittingDatasetWindow(QWidget):
     def on_history_item_clicked(self, item):
         """Показывает детали выбранной версии"""
         version = item.text().split(" ")[0]  # v1
-        changes = self._meta_data.get(version, "Информация недоступна")
+        changes = self.meta_tracker.get_change_description(version)
         self.label_detail.setText(f"🔸 {changes}")
 
     def update_history_display(self):
         """Обновляет список истории"""
         self.history_list.clear()
-        for ver in sorted(self._meta_data.keys(), key=lambda x: int(x[1:])):
-            item = QListWidgetItem(f"{ver} – {self._meta_data[ver]}")
+        for version, changes in self.meta_tracker.history.items():
+            item = QListWidgetItem(f"{version} – {changes}")
             self.history_list.addItem(item)
 
     def add_section_separator(self, layout, text):
@@ -208,9 +210,8 @@ class SplittingDatasetWindow(QWidget):
         self.missing_df = None
         self.class_filtered_df = None
         self.df_path = None
-        self._version = 1
-        self._meta_data = {}
-        self._pending_changes = []
+        self._last_loaded_path = None
+        self.meta_tracker = MetaTracker(max_line_length=150)  # Восстанавливаем трекер
 
         self.info_label.setText("Датасет не загружен.")
         self.target_combo.clear()
@@ -236,6 +237,8 @@ class SplittingDatasetWindow(QWidget):
         if hasattr(self, 'str_edit'):
             delattr(self, 'str_edit')
 
+        self.update_history_display()
+
     def clear_input_fields(self):
         """Очищает поля ввода"""
         while self.input_container.count():
@@ -244,7 +247,7 @@ class SplittingDatasetWindow(QWidget):
                 child.widget().deleteLater()
 
     def load_dataset(self):
-        """Загрузка CSV с учётом #META"""
+        """Загрузка датасета с использованием MetaTracker"""
         dataset_dir = "dataset"
         if not os.path.exists(dataset_dir):
             QMessageBox.critical(self, "Ошибка", f"Папка '{dataset_dir}' не найдена!")
@@ -257,32 +260,14 @@ class SplittingDatasetWindow(QWidget):
             return
 
         try:
-            # Парсим # META: строки
-            with open(file_path, 'r', encoding='utf-8') as f:
-                meta_lines = []
-                for line in f:
-                    stripped = line.strip()
-                    if stripped.startswith("# META:"):
-                        meta_lines.append(stripped)
-                    elif stripped and not stripped.startswith("#"):
-                        break
-
-                self._meta_data = {}
-                for line in meta_lines:
-                    line = line.replace("# META:", "").strip()
-                    parts = line.split("|")
-                    for part in parts:
-                        part = part.strip()
-                        if part.startswith("v"):
-                            version_part = part.split(maxsplit=1)
-                            if len(version_part) == 2:
-                                ver = version_part[0]
-                                changes = version_part[1]
-                                self._meta_data[ver] = changes
+            # Загружаем мета-информацию
+            self.meta_tracker.load_from_file(file_path)
 
             # Читаем данные
             self.df = pd.read_csv(file_path, comment='#', skipinitialspace=True)
             self.df_path = file_path
+            self._last_loaded_path = file_path
+
             filename = os.path.basename(file_path)
             rows, cols = self.df.shape
 
@@ -305,7 +290,8 @@ class SplittingDatasetWindow(QWidget):
 
             self.split_btn.setEnabled(True)
 
-            # Обновляем историю в UI
+            # Обновляем историю
+            self.meta_tracker.add_change("загружен датасет для разделения")
             self.update_history_display()
 
         except Exception as e:
@@ -423,7 +409,9 @@ class SplittingDatasetWindow(QWidget):
         self.class_filtered_df = self.df[mask].copy()
         self.class_result_label.setText(f"<b>Фильтрация по '{column}'</b><br>{result_text}")
         self.save_class_btn.setEnabled(True)
-        self._pending_changes.append(change_text)
+
+        # Добавляем изменение
+        self.meta_tracker.add_change(change_text)
 
     def split_by_target(self):
         """Разделение по пропускам в целевой переменной"""
@@ -440,7 +428,7 @@ class SplittingDatasetWindow(QWidget):
             missing_count = len(self.missing_df)
 
             change_text = f"разделён по пропускам в '{self.target_column}'"
-            self._pending_changes.append(change_text)
+            self.meta_tracker.add_change(change_text)
 
             result_text = f"""
             <b>Разделение по целевой переменной: '{self.target_column}'</b><br><br>
@@ -464,86 +452,37 @@ class SplittingDatasetWindow(QWidget):
         self.save_dataframe(self.missing_df, f"with_{self.target_column}_missing", "Набор с пропусками")
 
     def save_class_dataset(self):
-        """Сохранить отфильтрованный датасет"""
         if self.class_filtered_df is None:
             return
         suffix = f"filtered_by_{self.class_combo.currentText()}"
         self.save_dataframe(self.class_filtered_df, suffix, "Отфильтрованный датасет")
 
-    def get_next_version(self, base_path):
-        """Возвращает следующий номер версии и актуальный путь"""
-        if not os.path.exists(base_path + "_v1.csv"):
-            return 1, base_path + "_v1.csv"
-
-        version = 1
-        while os.path.exists(base_path + f"_v{version}.csv"):
-            version += 1
-        return version, base_path + f"_v{version}.csv"
-
     def save_dataframe(self, df, suffix, name):
-        """Сохранение DataFrame в папку dataset/split с версионированием и #META"""
+        """Сохранение DataFrame с использованием MetaTracker"""
         try:
             output_dir = "dataset/split"
             os.makedirs(output_dir, exist_ok=True)
 
-            base_name = os.path.splitext(os.path.basename(self.df_path))[0] if self.df_path else "dataset"
-            base_path = os.path.join(output_dir, f"{base_name}_{suffix}")
+            base_name = "dataset"
+            if self._last_loaded_path:
+                base_name = os.path.splitext(os.path.basename(self._last_loaded_path))[0]
+                base_name = base_name.split("_v")[0]
 
-            version, save_path = self.get_next_version(base_path)
+            save_path = os.path.join(output_dir, f"{base_name}_{suffix}_v{self.meta_tracker.version}.csv")
 
-            # Добавляем текущие изменения
-            current_version = f"v{version}"
-            if self._pending_changes:
-                self._meta_data[current_version] = ", ".join(self._pending_changes)
+            success = self.meta_tracker.save_to_file(save_path, df)
+            if success:
+                self._last_loaded_path = save_path
+                self.meta_tracker.version += 1
+                self.update_history_display()
+                self.label_detail.setText(f"✅ Последнее изменение сохранено (v{self.meta_tracker.version - 1})")
+
+                QMessageBox.information(
+                    self, "Сохранено",
+                    f"{name} сохранён:\n{os.path.basename(save_path)}\n\nВерсия: v{self.meta_tracker.version - 1}"
+                )
             else:
-                if current_version not in self._meta_data:
-                    self._meta_data[current_version] = "без изменений"
-            self._pending_changes.clear()
-
-            # Формируем строку: v1 ...|v2 ...
-            parts = []
-            for ver in sorted(self._meta_data.keys(), key=lambda x: int(x[1:])):
-                changes = self._meta_data[ver]
-                parts.append(f"{ver} {changes}")
-            full_content = "|".join(parts)
-            full_line = f"# META: {full_content}"
-
-            # Разбиваем на строки по 150 символам
-            max_len = 150
-            meta_lines = []
-            if len(full_line) <= max_len:
-                meta_lines.append(full_line)
-            else:
-                words = full_content.split("|")
-                current = "# META:"
-                for word in words:
-                    test = current + ("|" if current != "# META:" else " ") + word
-                    if len(test) <= max_len:
-                        if current == "# META:":
-                            current = f"# META: {word}"
-                        else:
-                            current += "|" + word
-                    else:
-                        if current != "# META:":
-                            meta_lines.append(current)
-                        current = f"# META: {word}"
-                if current != "# META:":
-                    meta_lines.append(current)
-
-            # Записываем
-            with open(save_path, "w", encoding="utf-8") as f:
-                for line in meta_lines:
-                    f.write(line + "\n")
-                df.to_csv(f, index=False)
-
-            # Обновляем историю в интерфейсе
-            self.update_history_display()
-            self.label_detail.setText("Последнее изменение сохранено.")
-
-            QMessageBox.information(
-                self, "Сохранено",
-                f"{name} сохранён:\n{save_path}\n\nВерсия: v{version}"
-            )
+                QMessageBox.critical(self, "Ошибка", "Не удалось сохранить файл.")
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить файл:\n{str(e)}")

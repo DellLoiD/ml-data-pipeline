@@ -1,7 +1,7 @@
 # preprocessing/checking_data_formats_ui.py
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QTableWidgetItem,
-    QFileDialog, QMessageBox, QComboBox, QFrame, QGroupBox, QTextEdit, QLineEdit, QInputDialog
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFileDialog,
+    QMessageBox, QComboBox, QFrame, QGroupBox, QTextEdit, QLineEdit, QInputDialog
 )
 from PySide6.QtCore import Qt
 import os
@@ -9,21 +9,22 @@ import shutil
 import pandas as pd
 import numpy as np
 
+# Импорт нового класса
+from utils.meta_tracker import MetaTracker
+
 
 class CheckingDataFormatsWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.df = None
         self._last_loaded_path = None
-        self._version = 1
-        self._meta_data = {}
-        self._pending_changes = []
+        self.meta_tracker = MetaTracker(max_line_length=150)
         self.param_descriptions = {}
         self.setup_ui()
 
     def setup_ui(self):
         self.setWindowTitle("Проверка форматов данных")
-        self.resize(800, 600)  # Немного увеличена высота
+        self.resize(800, 600)
 
         layout = QVBoxLayout()
 
@@ -91,7 +92,7 @@ class CheckingDataFormatsWindow(QWidget):
         line1.setFrameShadow(QFrame.Sunken)
         layout.addWidget(line1)
 
-        # === Объединённая строка: выбор и действия ===
+        # === Контрольная строка: выбор и действия ===
         control_layout = QHBoxLayout()
         control_layout.addWidget(QLabel("Выберите колонку:"))
 
@@ -166,7 +167,7 @@ class CheckingDataFormatsWindow(QWidget):
         self.results_text = QTextEdit()
         self.results_text.setReadOnly(True)
         self.results_text.setPlaceholderText("Результаты анализа...")
-        self.results_text.setFixedHeight(220)  # Увеличено на ~4 строки
+        self.results_text.setFixedHeight(220)
         outlier_layout.addWidget(self.results_text)
 
         outlier_group.setLayout(outlier_layout)
@@ -185,9 +186,7 @@ class CheckingDataFormatsWindow(QWidget):
     def reset_state(self):
         self.df = None
         self._last_loaded_path = None
-        self._version = 1
-        self._meta_data = {}
-        self._pending_changes = []
+        self.meta_tracker = MetaTracker(max_line_length=150)
         self.param_descriptions = {}
 
         self.column_combo.clear()
@@ -227,9 +226,7 @@ class CheckingDataFormatsWindow(QWidget):
             new_filename = f"{safe_name}_v0.csv"
             save_path = os.path.join(dataset_dir, new_filename)
 
-            with open(save_path, "w", encoding="utf-8") as f:
-                f.write("# META: v0 без изменений\n")
-                df.to_csv(f, index=False, encoding="utf-8", lineterminator="\n")
+            df.to_csv(save_path, index=False, encoding="utf-8")
 
             QMessageBox.information(
                 self, "Успех",
@@ -238,6 +235,7 @@ class CheckingDataFormatsWindow(QWidget):
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось импортировать датасет:\n{e}")
+
 
     def load_parameter_descriptions(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -283,28 +281,7 @@ class CheckingDataFormatsWindow(QWidget):
             return
 
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                meta_lines = []
-                for line in f:
-                    stripped = line.strip()
-                    if stripped.startswith("# META:"):
-                        meta_lines.append(stripped)
-                    elif stripped and not stripped.startswith("#"):
-                        break
-
-            self._meta_data = {}
-            for line in meta_lines:
-                line = line.replace("# META:", "").strip()
-                parts = line.split("|")
-                for part in parts:
-                    part = part.strip()
-                    if part.startswith("v"):
-                        version_part = part.split(maxsplit=1)
-                        if len(version_part) == 2:
-                            ver = version_part[0]
-                            changes = version_part[1]
-                            self._meta_data[ver] = changes
-
+            self.meta_tracker.load_from_file(file_path)
             self.df = pd.read_csv(
                 file_path,
                 na_values=['', 'NA', 'N/A', 'NULL', '?', 'none', 'null', '.', ' '],
@@ -312,16 +289,6 @@ class CheckingDataFormatsWindow(QWidget):
                 comment='#'
             )
             self._last_loaded_path = file_path
-
-            filename = os.path.basename(file_path)
-            name, ext = os.path.splitext(filename)
-            if "_v" in name:
-                try:
-                    self._version = int(name.split("_v")[1]) + 1
-                except:
-                    self._version = 1
-            else:
-                self._version = 1
 
             rows, cols = self.df.shape
             total_missing = self.df.isnull().sum().sum()
@@ -356,7 +323,6 @@ class CheckingDataFormatsWindow(QWidget):
             if bool_cols:
                 type_info.append(f"✅ Булевы: {len(bool_cols)}")
 
-            # Теперь в столбик
             info_text = f"""
             <b>Размер:</b> {rows}×{cols}<br>
             <b>Пропусков:</b> {total_missing}<br><br>
@@ -404,7 +370,6 @@ class CheckingDataFormatsWindow(QWidget):
                 self.min_val_input.clear()
                 self.max_val_input.clear()
 
-        # Автоматический анализ при выборе колонки
         self.analyze_rare_classes()
 
     def update_categories_display(self, cat_counts):
@@ -462,7 +427,7 @@ class CheckingDataFormatsWindow(QWidget):
 
         try:
             self.df = self.df.drop(columns=[column]).copy()
-            self._pending_changes.append(f"удалена колонка '{column}'")
+            self.meta_tracker.add_change(f"удалена колонка '{column}'")
             self.column_combo.removeItem(self.column_combo.currentIndex())
 
             if len(self.df.columns) == 0:
@@ -621,7 +586,9 @@ class CheckingDataFormatsWindow(QWidget):
             return
 
         self.df.loc[mask, column_name] = target_val
-        self._pending_changes.append(f"объединены значения в '{column_name}' от {min_val} до {max_val} в {target_val}")
+        self.meta_tracker.add_change(
+            f"объединены значения в '{column_name}' от {min_val} до {max_val} в {target_val}"
+        )
         self.save_btn.setEnabled(True)
 
         QMessageBox.information(
@@ -638,54 +605,24 @@ class CheckingDataFormatsWindow(QWidget):
             QMessageBox.critical(self, "Ошибка", "Неизвестен путь загрузки.")
             return
 
-        name, ext = os.path.splitext(os.path.basename(self._last_loaded_path))
-        base_name = name.split("_v")[0] if "_v" in name else name
-        new_filename = f"{base_name}_v{self._version}{ext}"
-        save_path = os.path.join("dataset", new_filename)
+        base_name = os.path.splitext(os.path.basename(self._last_loaded_path))[0]
+        base_name = base_name.split("_v")[0] if "_v" in base_name else base_name
+        save_path = os.path.join("dataset", f"{base_name}_v{self.meta_tracker.version}.csv")
 
         try:
-            current_version = f"v{self._version}"
-            if self._pending_changes:
-                self._meta_data[current_version] = ", ".join(self._pending_changes)
+            success = self.meta_tracker.save_to_file(save_path, self.df)
+            if success:
+                self._last_loaded_path = save_path
+                self.meta_tracker.version += 1  # Увеличиваем для следующего сохранения
+                self.save_btn.setEnabled(False)
+                self.update_missing_summary()
+
+                QMessageBox.information(
+                    self, "Сохранено",
+                    f"✅ Датасет сохранён:\n{os.path.basename(save_path)}\n\nВерсия: v{self.meta_tracker.version - 1}"
+                )
             else:
-                if current_version not in self._meta_data:
-                    self._meta_data[current_version] = "без изменений"
-
-            parts = [f"{ver} {self._meta_data[ver]}" for ver in sorted(self._meta_data.keys(), key=lambda x: int(x[1:]))]
-            full_line = f"# META: {'|'.join(parts)}"
-
-            max_len = 150
-            meta_lines = []
-            current_line = "# META:"
-            for part in full_line.split("|"):
-                test_line = current_line + ("|" if current_line != "# META:" else " ") + part
-                if len(test_line) <= max_len:
-                    if current_line == "# META:":
-                        current_line = f"# META: {part}"
-                    else:
-                        current_line += "|" + part
-                else:
-                    if current_line != "# META:":
-                        meta_lines.append(current_line)
-                    current_line = f"# META: {part}"
-            if current_line != "# META:":
-                meta_lines.append(current_line)
-
-            with open(save_path, "w", encoding="utf-8") as f:
-                for line in meta_lines:
-                    f.write(line + "\n")
-                self.df.to_csv(f, index=False, encoding="utf-8", lineterminator="\n")
-
-            self._pending_changes.clear()
-            self._last_loaded_path = save_path
-            self._version += 1
-
-            QMessageBox.information(
-                self, "Сохранено",
-                f"✅ Датасет сохранён:\n{new_filename}\n\nВерсия: v{self._version - 1}"
-            )
-            self.save_btn.setEnabled(False)
-            self.update_missing_summary()
+                QMessageBox.critical(self, "Ошибка", "Не удалось сохранить файл.")
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить:\n{e}")

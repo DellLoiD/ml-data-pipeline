@@ -1,13 +1,16 @@
-# imputation_by_model_ui.py
+# preprocessing/imputation_by_model_ui.py
 import os
-import joblib  # Только joblib — он умеет в .pkl от sklearn
+import joblib
 import pandas as pd
 import traceback
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog,
-    QComboBox, QGroupBox, QTextEdit, QDialog, QDialogButtonBox, QApplication
+    QComboBox, QGroupBox, QTextEdit, QDialog, QDialogButtonBox
 )
-from PySide6.QtGui import QFont, QClipboard
+from PySide6.QtGui import QFont
+
+# Импорт нового трекера
+from utils.meta_tracker import MetaTracker
 
 
 class CopyableMessageBox(QDialog):
@@ -35,7 +38,7 @@ class CopyableMessageBox(QDialog):
         layout.addWidget(buttons)
 
     def copy_to_clipboard(self):
-        clipboard = QApplication.clipboard()
+        clipboard = self.window().clipboard()
         clipboard.setText(self.text_edit.toPlainText())
 
     @classmethod
@@ -57,12 +60,15 @@ class CopyableMessageBox(QDialog):
         result = msg_box.exec()
         return result == QDialog.Accepted
 
+
 class ImputationByModelApp(QWidget):
     def __init__(self):
         super().__init__()
         self.df = None
         self.model = None
         self.dataset_file_name = ""
+        self._last_loaded_path = None
+        self.meta_tracker = MetaTracker(max_line_length=150)  # Управление историей
         self.init_ui()
 
     def init_ui(self):
@@ -125,7 +131,6 @@ class ImputationByModelApp(QWidget):
         self.setLayout(layout)
         self.resize(700, 600)
         self.setWindowTitle("Восстановление пропущенных значений моделью")
-        self.show()
 
     def show_critical(self, title, message):
         msg_box = CopyableMessageBox(title, message, self)
@@ -143,8 +148,12 @@ class ImputationByModelApp(QWidget):
             return
 
         try:
-            self.df = pd.read_csv(file_path)
+            # Загружаем мета-информацию
+            self.meta_tracker.load_from_file(file_path)
+
+            self.df = pd.read_csv(file_path, comment='#')
             self.dataset_file_name = os.path.basename(file_path)
+            self._last_loaded_path = file_path
             self.load_data_btn.setText(f"✅ {self.dataset_file_name}")
 
             self.target_combo.clear()
@@ -163,6 +172,7 @@ class ImputationByModelApp(QWidget):
                 f"Колонок с NaN: {len(nan_columns)}"
             )
 
+            self.meta_tracker.add_change("загружен датасет для восстановления пропусков")
             self.check_run_button_state()
 
         except Exception as e:
@@ -177,7 +187,6 @@ class ImputationByModelApp(QWidget):
             return
 
         try:
-            # Проверяем существование и размер
             if not os.path.exists(file_path):
                 raise FileNotFoundError("Файл не найден")
 
@@ -185,12 +194,10 @@ class ImputationByModelApp(QWidget):
             if file_size == 0:
                 raise ValueError("Файл пуст")
 
-            # Используем joblib.load() — он работает и с .pkl от sklearn
             self.show_info("Загрузка", f"Попытка загрузить модель...\nФайл: {os.path.basename(file_path)}\nРазмер: {file_size} байт")
 
             loaded_obj = joblib.load(file_path)
 
-            # Если это словарь — извлекаем модель
             if isinstance(loaded_obj, dict):
                 if 'model' in loaded_obj:
                     self.model = loaded_obj['model']
@@ -209,7 +216,6 @@ class ImputationByModelApp(QWidget):
                 self.model = loaded_obj
                 self.show_info("Загрузка", "Модель загружена напрямую.")
 
-            # Проверка
             if not hasattr(self.model, 'predict'):
                 raise AttributeError(f"Объект типа {type(self.model)} не имеет метода .predict()")
 
@@ -269,6 +275,10 @@ class ImputationByModelApp(QWidget):
             predictions = self.model.predict(X_missing)
             self.df.loc[nan_mask, target_col] = predictions
 
+            # Добавляем в историю
+            model_type = str(type(self.model)).split('.')[-1].replace("'>", "")
+            self.meta_tracker.add_change(f"восстановлены {num_missing} значений в '{target_col}' моделью {model_type}")
+
             sample_preds = predictions[:10]
             result_text = f"<b>✅ Восстановлено {num_missing} значений!</b><br><br>"
             result_text += f"Целевая колонка: <b>{target_col}</b><br>"
@@ -292,15 +302,23 @@ class ImputationByModelApp(QWidget):
         if self.df is None:
             return
 
-        default_name = f"imputed_{self.dataset_file_name}"
-        save_path, _ = QFileDialog.getSaveFileName(
-            self, "Сохранить датасет", f"./dataset/{default_name}", "CSV Files (*.csv)"
-        )
-        if not save_path:
-            return
-
         try:
-            self.df.to_csv(save_path, index=False)
-            self.show_info("Сохранено", f"✅ Датасет сохранён:\n{save_path}")
+            # Определяем базовое имя
+            base_name = "imputed_dataset"
+            if self._last_loaded_path:
+                name = os.path.splitext(os.path.basename(self._last_loaded_path))[0]
+                base_name = name.split("_v")[0]
+
+            save_path = os.path.join("dataset", f"{base_name}_v{self.meta_tracker.version}.csv")
+
+            # Сохраняем через MetaTracker
+            success = self.meta_tracker.save_to_file(save_path, self.df)
+            if success:
+                self._last_loaded_path = save_path
+                self.meta_tracker.version += 1
+                self.show_info("Сохранено", f"✅ Датасет сохранён:\n{os.path.basename(save_path)}")
+            else:
+                self.show_critical("Ошибка", "Не удалось сохранить файл.")
+
         except Exception as e:
             self.show_critical("Ошибка", f"Не удалось сохранить файл:\n{e}")

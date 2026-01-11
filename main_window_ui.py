@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
 
 # === Импорт всех модулей ===
 from preprocessing.dataset_processing_check_nan import MissingValuesDialog
-from preprocessing.dataset_processing_fix_non_numeric_ui import OneHotEncodingWindow
+from preprocessing.dataset_processing_fix_non_numeric_ui import FixNonNumericWindow
 from preprocessing.correlation_graph_ui import CorrelationGraphUI
 from preprocessing.data_balancing.data_balancing_method_ui import DataBalancingApp
 from researching_models.check_models_ui import ClassificationApp
@@ -138,7 +138,7 @@ class TrainingWindow(QWidget):
     def fixNonNumericValue(self):
         global onehot_window_instance
         if not onehot_window_instance or not onehot_window_instance.isVisible():
-            onehot_window_instance = OneHotEncodingWindow()
+            onehot_window_instance = FixNonNumericWindow()
             onehot_window_instance.show()
 
     def open_splitting_dataset(self):

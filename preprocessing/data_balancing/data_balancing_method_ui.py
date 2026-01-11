@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
 from preprocessing.data_balancing.data_balancing_list_method_ui import BalancingMethodsWindow
 from preprocessing.data_balancing.dataset_trim.dataset_trim_window_ui import DatasetTrimWindow
 from preprocessing.data_balancing.data_balancing_operaiting_classes import FeatureSelector
-from preprocessing.data_balancing.align_columns_ui import AlignColumnsApp  # ← Новый импорт
+from preprocessing.data_balancing.align_columns_ui import AlignColumnsApp  
 
 # === Глобальные ссылки на окна (чтобы не открывалось несколько раз) ===
 balancing_window_instance = None

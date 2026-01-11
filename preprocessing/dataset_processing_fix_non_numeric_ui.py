@@ -1,4 +1,4 @@
-# preprocessing/one_hot_encoding_ui.py
+# preprocessing/dataset_processing_fix_non_numeric_ui.py
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog,
     QMessageBox, QTableWidget, QTableWidgetItem, QComboBox, QLabel
@@ -6,20 +6,21 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 import pandas as pd
 import os
-import sys
+
+# Импорт трекера
+from utils.meta_tracker import MetaTracker
 
 
-class OneHotEncodingWindow(QWidget):
+class FixNonNumericWindow(QWidget):
     def __init__(self, dataset=None):
         super().__init__()
         self.dataset_df = dataset
-        self._meta_line = "# META:"  # Хранение строки метаданных
-        self._has_changes = False  # Контроль кнопки сохранения
         self._last_loaded_path = None
+        self.meta_tracker = MetaTracker(max_line_length=150)  # Управление историей и версиями
 
         # Настройка окна
         self.setMinimumSize(400, 300)
-        self.resize(500, 500)
+        self.resize(600, 500)
         self.setWindowTitle("Обработка категориальных признаков")
 
         # Главный макет
@@ -35,12 +36,12 @@ class OneHotEncodingWindow(QWidget):
         btn_show_non_numeric.clicked.connect(self.display_unique_values)
         main_layout.addWidget(btn_show_non_numeric)
 
-        # === Таблица: Уникальные значения ===
+        # === Таблица: Уникальные значения (3 колонки) ===
         self.table_widget = QTableWidget()
         self.table_widget.horizontalHeader().setStretchLastSection(True)
         self.table_widget.verticalHeader().hide()
-        self.table_widget.setColumnCount(2)
-        self.table_widget.setHorizontalHeaderLabels(['Колонка', 'Значения'])
+        self.table_widget.setColumnCount(3)
+        self.table_widget.setHorizontalHeaderLabels(['Колонка', 'Кол-во классов', 'Значения'])
         main_layout.addWidget(self.table_widget)
 
         # === Выбор колонки ===
@@ -85,7 +86,7 @@ class OneHotEncodingWindow(QWidget):
         # === Кнопка: Сохранить датасет ===
         self.save_button = QPushButton('💾 Сохранить датасет')
         self.save_button.clicked.connect(self.save_processed_dataset)
-        self.save_button.setEnabled(False)  # Активна только после изменений
+        self.save_button.setEnabled(False)  # 🔴 По умолчанию выключена
         main_layout.addWidget(self.save_button)
 
         self.setLayout(main_layout)
@@ -94,16 +95,15 @@ class OneHotEncodingWindow(QWidget):
     def reset_ui(self):
         """Сброс всех полей"""
         self.dataset_df = None
-        self._meta_line = "# META:"
-        self._has_changes = False
         self._last_loaded_path = None
         self.btn_select_dataset.setText('📂 Выбрать датасет')
         self.column_selector.clear()
         self.table_widget.setRowCount(0)
-        self.save_button.setEnabled(False)
+        self.save_button.setEnabled(False)  # 🔴 Сбрасываем
+        self.meta_tracker = MetaTracker(max_line_length=150)
 
     def select_raw_dataset(self):
-        """Загрузка датасета с учётом #META"""
+        """Загрузка датасета с использованием MetaTracker"""
         filename, _ = QFileDialog.getOpenFileName(
             self, 'Выбрать датасет', './dataset', 'CSV Files (*.csv)'
         )
@@ -111,13 +111,8 @@ class OneHotEncodingWindow(QWidget):
             return
 
         try:
-            # Читаем #META строку
-            with open(filename, 'r', encoding='utf-8') as f:
-                first_line = f.readline().strip()
-            if first_line.startswith("# META:"):
-                self._meta_line = first_line
-            else:
-                self._meta_line = "# META:"
+            # Загружаем мета-информацию
+            self.meta_tracker.load_from_file(filename)
 
             # Загружаем CSV, игнорируя строки с комментариями
             self.dataset_df = pd.read_csv(filename, comment='#')
@@ -150,9 +145,15 @@ class OneHotEncodingWindow(QWidget):
         row_idx = 0
         for col in non_numeric_columns[:rows_to_display]:
             unique_vals = self.dataset_df[col].dropna().unique()
-            value_string = ', '.join(map(str, unique_vals))
+            count = len(unique_vals)
+            # Показываем первые 5 значений
+            sample_vals = ', '.join(map(str, unique_vals[:5]))
+            if len(unique_vals) > 5:
+                sample_vals += f", ..."
+
             self.table_widget.setItem(row_idx, 0, QTableWidgetItem(col))
-            self.table_widget.setItem(row_idx, 1, QTableWidgetItem(value_string))
+            self.table_widget.setItem(row_idx, 1, QTableWidgetItem(str(count)))
+            self.table_widget.setItem(row_idx, 2, QTableWidgetItem(sample_vals))
             row_idx += 1
 
         # Обновляем комбобокс
@@ -162,8 +163,8 @@ class OneHotEncodingWindow(QWidget):
         else:
             self.column_selector.addItem("Нет нечисловых колонок")
 
-        self._has_changes = False
-        self.save_button.setEnabled(False)
+        # ❌ УДАЛЕНО: self.save_button.setEnabled(False)
+        # Это мешало, если данные уже были изменены, но пользователь просто нажал "Показать"
 
     def remove_selected_column(self):
         """Удаление выбранной колонки"""
@@ -181,9 +182,8 @@ class OneHotEncodingWindow(QWidget):
 
         try:
             self.dataset_df.drop(columns=[column_name], inplace=True)
-            self._meta_line += f", удалён столбец '{column_name}'"
-            self._has_changes = True
-            self.save_button.setEnabled(True)
+            self.meta_tracker.add_change(f"удалён столбец '{column_name}'")
+            self.save_button.setEnabled(True)  # ✅ Активируем
             QMessageBox.information(self, "Готово", f"Столбец '{column_name}' удалён.")
             self.display_unique_values()
         except Exception as e:
@@ -196,11 +196,10 @@ class OneHotEncodingWindow(QWidget):
             QMessageBox.warning(self, "Предупреждение", "Выберите колонку для обработки!")
             return
 
-        # Применяем метод
         try:
             method_func(column_name)
-            self._has_changes = True
-            self.save_button.setEnabled(True)
+            self.save_button.setEnabled(True)  # ✅ Активируем после любого метода
+            self.display_unique_values()
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка при применении метода:\n{e}")
 
@@ -233,7 +232,7 @@ class OneHotEncodingWindow(QWidget):
         try:
             encoded_df = pd.get_dummies(self.dataset_df, columns=[column_name])
             self.dataset_df = encoded_df
-            self._meta_line += f", One-Hot Encoding для '{column_name}'"
+            self.meta_tracker.add_change(f"One-Hot Encoding для '{column_name}'")
             QMessageBox.information(self, "Готово", f"One-Hot Encoding применён к '{column_name}'.")
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось выполнить One-Hot Encoding:\n{e}")
@@ -243,7 +242,7 @@ class OneHotEncodingWindow(QWidget):
         le = LabelEncoder()
         try:
             self.dataset_df[column_name] = le.fit_transform(self.dataset_df[column_name].astype(str))
-            self._meta_line += f", Label Encoding для '{column_name}'"
+            self.meta_tracker.add_change(f"Label Encoding для '{column_name}'")
             QMessageBox.information(self, "Готово", f"Label Encoding применён к '{column_name}'.")
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка при Label Encoding:\n{e}")
@@ -256,7 +255,7 @@ class OneHotEncodingWindow(QWidget):
             mean_map = self.dataset_df.groupby(column_name)['target'].mean().to_dict()
             new_col = f"{column_name}_encoded"
             self.dataset_df[new_col] = self.dataset_df[column_name].map(mean_map)
-            self._meta_line += f", Target Encoding для '{column_name}'"
+            self.meta_tracker.add_change(f"Target Encoding для '{column_name}'")
             QMessageBox.information(self, "Готово", f"Target Encoding применён к '{column_name}'.")
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка при Target Encoding:\n{e}")
@@ -266,7 +265,7 @@ class OneHotEncodingWindow(QWidget):
             freq_map = self.dataset_df[column_name].value_counts(normalize=True).to_dict()
             new_col = f"{column_name}_freq_encoded"
             self.dataset_df[new_col] = self.dataset_df[column_name].map(freq_map)
-            self._meta_line += f", Frequency Encoding для '{column_name}'"
+            self.meta_tracker.add_change(f"Frequency Encoding для '{column_name}'")
             QMessageBox.information(self, "Готово", f"Frequency Encoding применён к '{column_name}'.")
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка при Frequency Encoding:\n{e}")
@@ -277,7 +276,7 @@ class OneHotEncodingWindow(QWidget):
             encoder = BinaryEncoder(cols=[column_name])
             encoded_df = encoder.fit_transform(self.dataset_df)
             self.dataset_df = encoded_df
-            self._meta_line += f", Binary Encoding для '{column_name}'"
+            self.meta_tracker.add_change(f"Binary Encoding для '{column_name}'")
             QMessageBox.information(self, "Готово", f"Binary Encoding применён к '{column_name}'.")
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка при Binary Encoding:\n{e}")
@@ -315,22 +314,21 @@ class OneHotEncodingWindow(QWidget):
         )
         if reply == QMessageBox.Yes:
             self.dataset_df.drop(columns=[column_name], inplace=True)
-            self._meta_line += f", обработана как дата, удалена колонка '{column_name}'"
+            self.meta_tracker.add_change(f"обработана как дата, удалена колонка '{column_name}'")
         else:
-            self._meta_line += f", обработана как дата, колонка '{column_name}' сохранена"
+            self.meta_tracker.add_change(f"обработана как дата, колонка '{column_name}' сохранена")
 
         QMessageBox.information(self, "Успех", "Дата успешно разбита на признаки.")
-        self._has_changes = True
-        self.save_button.setEnabled(True)
+        self.save_button.setEnabled(True)  # ✅ Активируем
         self.display_unique_values()
 
     def save_processed_dataset(self):
-        """Сохранение с обновлением #META и версионированием"""
-        if self.dataset_df is None or not self._has_changes:
-            QMessageBox.warning(self, "Предупреждение", "Нет изменений для сохранения.")
+        """Сохранение с использованием MetaTracker"""
+        if self.dataset_df is None:
+            QMessageBox.warning(self, "Предупреждение", "Нет данных для сохранения.")
             return
 
-        # Определяем имя и версию
+        # Определяем базовое имя
         base_name = "dataset"
         if self._last_loaded_path:
             path = os.path.basename(self._last_loaded_path)
@@ -338,39 +336,30 @@ class OneHotEncodingWindow(QWidget):
             if "_v" in name:
                 try:
                     base, ver = name.rsplit("_v", 1)
-                    version = int(ver) + 1
                     base_name = base
                 except:
                     base_name = name
-                    version = 1
             else:
                 base_name = name
-                version = 1
         else:
-            version = 1
+            base_name = "dataset"
 
-        save_path = os.path.join("dataset", f"{base_name}_v{version}.csv")
+        save_path = os.path.join("dataset", f"{base_name}_v{self.meta_tracker.version}.csv")
 
         try:
-            with open(save_path, "w", encoding="utf-8") as f:
-                f.write(self._meta_line + "\n")
-                self.dataset_df.to_csv(f, index=False)
+            success = self.meta_tracker.save_to_file(save_path, self.dataset_df)
+            if success:
+                self._last_loaded_path = save_path
+                self.save_button.setEnabled(False)  # 🔴 Деактивируем только после сохранения
+                self.meta_tracker.version += 1
 
-            QMessageBox.information(
-                self, "Сохранено",
-                f"✅ Датасет сохранён:\n{save_path}\n\nВерсия: v{version}"
-            )
-            self.save_button.setEnabled(False)
-            self._has_changes = False
-            self._last_loaded_path = save_path
+                QMessageBox.information(
+                    self, "Сохранено",
+                    f"✅ Датасет сохранён:\n{os.path.basename(save_path)}\n\n"
+                    f"Версия: v{self.meta_tracker.version - 1}"
+                )
+            else:
+                QMessageBox.critical(self, "Ошибка", "Не удалось сохранить файл.")
 
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить файл:\n{e}")
-
-
-if __name__ == "__main__":
-    from PySide6.QtWidgets import QApplication
-    app = QApplication(sys.argv)
-    window = OneHotEncodingWindow()
-    window.show()
-    sys.exit(app.exec())
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить:\n{e}")

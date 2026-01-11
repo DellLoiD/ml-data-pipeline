@@ -1,8 +1,5 @@
 # preprocessing/data_balancing/data_balancing_list_method_ui.py
-
-import sys
-import os
-import numpy as np
+import sys, os
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from PySide6.QtCore import Signal
@@ -13,7 +10,7 @@ from PySide6.QtWidgets import (
 )
 import preprocessing.data_balancing.data_balancing_list_method_logic as balancing_methods
 from preprocessing.data_balancing.setting_window_of_methods_balansing.smote_dialog_window_ui import show_smote_parameter_dialog
-
+from utils.meta_tracker import MetaTracker
 
 class BalancingMethodsWindow(QDialog):
     balancing_finished_signal = Signal(str)
@@ -24,6 +21,11 @@ class BalancingMethodsWindow(QDialog):
         self.y_train = y_train
         self.X_resampled = None
         self.y_resampled = None
+        self.dataset_filename = None
+        self.feature_cols = None
+        self.target_col = None
+        self._last_loaded_path = None
+        self.meta_tracker = MetaTracker(max_line_length=150)  # Управление историей
         self.initUI()
 
     def initUI(self):
@@ -119,9 +121,9 @@ class BalancingMethodsWindow(QDialog):
         table.setColumnCount(2)
         table.setHorizontalHeaderLabels(["Класс", "Количество"])
         table.horizontalHeader().setStretchLastSection(True)
-        table.setEditTriggers(QTableWidget.NoEditTriggers)  # Только для чтения
-        table.setMaximumHeight(200)  # Ограничиваем высоту
-        table.verticalHeader().setVisible(False)  # Убираем нумерацию строк
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.setMaximumHeight(200)
+        table.verticalHeader().setVisible(False)
         return table
 
     def create_method_group(self, layout, title, method_names):
@@ -161,35 +163,48 @@ class BalancingMethodsWindow(QDialog):
         file_name, _ = file_dialog.getOpenFileName(self, "Выбор датасета", "", "CSV Files (*.csv)")
 
         if file_name:
-            df = pd.read_csv(file_name)
-            self.dataset_filename = file_name
+            try:
+                # Загружаем мета-информацию
+                self.meta_tracker.load_from_file(file_name)
 
-            numeric_columns = df.select_dtypes(include=['number', 'bool']).columns.tolist()
+                df = pd.read_csv(file_name, comment='#')
+                self.dataset_filename = file_name
+                self._last_loaded_path = file_name
 
-            item, ok = QInputDialog.getItem(
-                self,
-                "Выбор целевой переменной (number или bool)",
-                "Выберите целевую переменную:",
-                numeric_columns,
-                editable=False
-            )
+                numeric_columns = df.select_dtypes(include=['number', 'bool']).columns.tolist()
 
-            if ok and item:
-                target_col = item
-                feature_cols = list(set(numeric_columns) - {target_col})
-                self.feature_cols = feature_cols
-                self.target_col = target_col
+                if not numeric_columns:
+                    QMessageBox.warning(self, "Ошибка", "В датасете нет числовых колонок.")
+                    return
 
-                self.X = df[feature_cols].values
-                self.y = df[target_col].values
-
-                self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(
-                    self.X, self.y, test_size=0.2, random_state=42
+                item, ok = QInputDialog.getItem(
+                    self,
+                    "Выбор целевой переменной (number или bool)",
+                    "Выберите целевую переменную:",
+                    numeric_columns,
+                    editable=False
                 )
 
-                self.update_class_distribution_labels()
-            else:
-                QMessageBox.warning(self, "Предупреждение", "Необходимо выбрать целевую переменную!")
+                if ok and item:
+                    target_col = item
+                    feature_cols = list(set(numeric_columns) - {target_col})
+                    self.feature_cols = feature_cols
+                    self.target_col = target_col
+
+                    self.X = df[feature_cols].values
+                    self.y = df[target_col].values
+
+                    self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(
+                        self.X, self.y, test_size=0.2, random_state=42
+                    )
+
+                    self.update_class_distribution_labels()
+                    self.meta_tracker.add_change("загружен датасет для балансировки")
+                else:
+                    QMessageBox.warning(self, "Предупреждение", "Необходимо выбрать целевую переменную!")
+
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить файл:\n{e}")
 
     def update_class_distribution_labels(self):
         """Обновляет таблицы распределения классов (ограничено 20 строками)"""
@@ -242,25 +257,33 @@ class BalancingMethodsWindow(QDialog):
                 balanced_X_train, balanced_y_train = method_func(
                     self.X_train, self.y_train, round_labels=round_labels, **parameters
                 )
+                # Формируем строку параметров
+                k = parameters.get('k_neighbors', 'auto')
+                s = parameters.get('sampling_strategy', 'auto')
+                param_str = f" (k_neighbors={k}, sampling_strategy={s})"
             else:
                 balanced_X_train, balanced_y_train = method_func(
                     self.X_train, self.y_train, round_labels=round_labels
                 )
+                param_str = ""
+
+            # Успешное выполнение
+            if balanced_X_train is not None and balanced_y_train is not None:
+                self.X_resampled = balanced_X_train
+                self.y_resampled = balanced_y_train
+
+                # Добавляем в историю
+                self.meta_tracker.add_change(f"применён метод '{method_name}'{param_str}")
+
+                # Обновляем таблицу "после"
+                self.update_table(self.after_table, self.y_resampled, "После балансировки")
+
+                QMessageBox.information(self, "Успех", f"Метод '{method_name}' успешно применён.")
+            else:
+                QMessageBox.warning(self, "Предупреждение", "Не удалось сбалансировать данные.")
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось применить метод:\n{str(e)}")
-            return
-
-        if balanced_X_train is not None and balanced_y_train is not None:
-            self.X_resampled = balanced_X_train
-            self.y_resampled = balanced_y_train
-
-            # Обновляем таблицу "после"
-            self.update_table(self.after_table, self.y_resampled, "После балансировки")
-
-            QMessageBox.information(self, "Успех", f"Метод '{method_name}' успешно применён.")
-        else:
-            QMessageBox.warning(self, "Предупреждение", "Не удалось сбалансировать данные.")
 
     def save_dataset(self):
         if self.X_resampled is None or self.y_resampled is None:
@@ -271,16 +294,26 @@ class BalancingMethodsWindow(QDialog):
             resampled_df = pd.DataFrame(data=self.X_resampled, columns=self.feature_cols)
             resampled_df[self.target_col] = self.y_resampled
 
-            original_basename = os.path.splitext(os.path.basename(self.dataset_filename))[0]
-            target_variable = self.target_col
-            most_common_class = pd.Series(self.y_resampled).value_counts().index[0]
-            count_most_common_class = pd.Series(self.y_resampled).value_counts()[most_common_class]
+            # Используем имя из метаданных
+            base_name = "balanced_dataset"
+            if self._last_loaded_path:
+                base_name = os.path.splitext(os.path.basename(self._last_loaded_path))[0]
+                base_name = base_name.split("_v")[0]  # Убираем версию
 
-            new_filename = f"{original_basename}-balanced-{target_variable}-size{count_most_common_class}.csv"
-            output_path = os.path.join("./dataset", new_filename)
+            save_path = os.path.join("dataset", f"{base_name}_v{self.meta_tracker.version}.csv")
 
-            resampled_df.to_csv(output_path, index=False)
-            QMessageBox.information(self, "Успех", f"Датасет успешно сохранён в {output_path}")
+            # Сохраняем через MetaTracker
+            success = self.meta_tracker.save_to_file(save_path, resampled_df)
+            if success:
+                self._last_loaded_path = save_path
+                self.meta_tracker.version += 1  # Увеличиваем для следующего раза
+                QMessageBox.information(
+                    self, "Сохранено",
+                    f"✅ Датасет сохранён:\n{os.path.basename(save_path)}\n\n"
+                    f"Версия: v{self.meta_tracker.version - 1}"
+                )
+            else:
+                QMessageBox.critical(self, "Ошибка", "Не удалось сохранить файл.")
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Произошла ошибка при сохранении файла: {e}")

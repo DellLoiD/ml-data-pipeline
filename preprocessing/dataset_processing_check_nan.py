@@ -3,8 +3,7 @@ import pandas as pd
 import os
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QFileDialog,
-    QMessageBox, QComboBox, QGroupBox, QDialog, QDialogButtonBox, QGridLayout,
-    QListWidget, QListWidgetItem
+    QMessageBox, QComboBox, QGroupBox, QDialog, QDialogButtonBox, QGridLayout
 )
 from PySide6.QtCore import Qt
 from preprocessing.repair_nan_methods.mice_method import impute_mice
@@ -18,6 +17,8 @@ from .dataset_processing_check_nan_logic import (
     impute_hot_deck,
     impute_em
 )
+# Импорт нового трекера
+from utils.meta_tracker import MetaTracker
 
 # 📝 Справки по методам
 IMPUTATION_HELP = {
@@ -82,7 +83,7 @@ class HelpDialog(QDialog):
     def __init__(self, title, text, parent=None):
         super().__init__(parent)
         self.setWindowTitle(title)
-        self.resize(300, 300)
+        self.resize(400, 300)
 
         layout = QVBoxLayout(self)
 
@@ -102,9 +103,7 @@ class MissingValuesDialog(QWidget):
         self.df = None
         self.df_original = None
         self.selected_file_path = None
-        self._version = 1
-        self._meta_data = {}  # {v1: изменения, v2: изменения...}
-        self._pending_changes = []  # Накопленные изменения до сохранения
+        self.meta_tracker = MetaTracker(max_line_length=150)
         self.init_ui()
 
     def init_ui(self):
@@ -194,38 +193,6 @@ class MissingValuesDialog(QWidget):
         actions_group.setLayout(actions_layout)
         main_layout.addWidget(actions_group)
 
-        # === История изменений ===
-        history_group = QGroupBox("История изменений")
-        history_layout = QVBoxLayout()
-
-        self.history_list = QListWidget()
-        self.history_list.setStyleSheet("""
-            QListWidget {
-                font-family: 'Courier';
-                font-size: 12px;
-                background: #f8f8f8;
-                border: 1px solid #ddd;
-                border-radius: 4px;
-            }
-            QListWidget::item {
-                padding: 4px;
-            }
-            QListWidget::item:selected {
-                background: #e0f0ff;
-                color: #000;
-            }
-        """)
-        self.history_list.setFixedHeight(120)
-        history_layout.addWidget(self.history_list)
-
-        self.label_detail = QLabel("Выберите версию, чтобы посмотреть изменения.")
-        self.label_detail.setWordWrap(True)
-        self.label_detail.setStyleSheet("font-size: 11px; color: #555;")
-        history_layout.addWidget(self.label_detail)
-
-        history_group.setLayout(history_layout)
-        main_layout.addWidget(history_group)
-
         # === Кнопка сохранения ===
         self.btn_save = QPushButton("💾 Сохранить датасет")
         self.btn_save.clicked.connect(self.save_dataset)
@@ -234,16 +201,7 @@ class MissingValuesDialog(QWidget):
 
         self.setLayout(main_layout)
         self.setWindowTitle('Обработка пропусков')
-        self.resize(600, 750)  # Увеличили высоту
-
-        # Подключаем клик по элементу
-        self.history_list.itemClicked.connect(self.on_history_item_clicked)
-
-    def on_history_item_clicked(self, item):
-        """Показывает детали выбранной версии"""
-        version = item.text().split(" ")[0]  # v1
-        changes = self._meta_data.get(version, "Нет информации")
-        self.label_detail.setText(f"🔸 {changes}")
+        self.resize(600, 750)
 
     def show_help(self, method_key):
         """Показывает справку по методу"""
@@ -253,34 +211,14 @@ class MissingValuesDialog(QWidget):
             dialog.exec()
 
     def select_raw_dataset(self):
-        """Выбор датасета с обработкой #META"""
+        """Выбор датасета с загрузкой меты"""
         filename, _ = self.get_open_filename()
         if not filename:
             return
 
         try:
-            # Читаем # META: строки
-            with open(filename, 'r', encoding='utf-8') as f:
-                meta_lines = []
-                for line in f:
-                    stripped = line.strip()
-                    if stripped.startswith("# META:"):
-                        meta_lines.append(stripped)
-                    elif stripped and not stripped.startswith("#"):
-                        break
-
-                self._meta_data = {}
-                for line in meta_lines:
-                    line = line.replace("# META:", "").strip()
-                    parts = line.split("|")
-                    for part in parts:
-                        part = part.strip()
-                        if part.startswith("v"):
-                            version_part = part.split(maxsplit=1)
-                            if len(version_part) == 2:
-                                ver = version_part[0]
-                                changes = version_part[1]
-                                self._meta_data[ver] = changes
+            # Загружаем мету
+            self.meta_tracker.load_from_file(filename)
 
             # Читаем данные
             self.df = pd.read_csv(filename, comment='#', skipinitialspace=True)
@@ -289,16 +227,6 @@ class MissingValuesDialog(QWidget):
             self.btn_select_dataset.setText(f'✅ {basename}')
             self.selected_file_path = filename
 
-            # Определяем версию
-            name, ext = os.path.splitext(basename)
-            if "_v" in name:
-                try:
-                    self._version = int(name.split("_v")[1]) + 1
-                except:
-                    self._version = 1
-            else:
-                self._version = 1
-
             # Обновляем интерфейс
             total_rows = len(self.df)
             total_cols = len(self.df.columns)
@@ -306,7 +234,6 @@ class MissingValuesDialog(QWidget):
             self.label_total_cols.setText(f"Всего колонок: {total_cols}")
 
             self.show_missing_values()
-            self.update_history_display()
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить датасет:\n{e}")
@@ -377,8 +304,8 @@ class MissingValuesDialog(QWidget):
         after = len(self.df)
         deleted = before - after
 
-        change_text = f"удалены строки с NaN в '{col}'"
-        self._pending_changes.append(change_text)
+        # Добавляем в историю
+        self.meta_tracker.add_change(f"удалены строки с NaN в '{col}'")
         self.btn_save.setEnabled(True)
 
         QMessageBox.information(self, "Готово", f"Удалено {deleted} строк. Осталось: {after}.")
@@ -423,8 +350,7 @@ class MissingValuesDialog(QWidget):
             }.get(method, method)
 
             filled = old_missing - new_missing
-            change_text = f"пропуски в '{col}' заполнены методом {method_name} ({filled})"
-            self._pending_changes.append(change_text)
+            self.meta_tracker.add_change(f"пропуски в '{col}' заполнены методом {method_name} ({filled})")
             self.btn_save.setEnabled(True)
 
             QMessageBox.information(self, "Успех", f"Пропуски восстановлены:\n{description}")
@@ -433,84 +359,34 @@ class MissingValuesDialog(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось восстановить:\n{e}")
 
-    def update_history_display(self):
-        """Обновляет отображение истории"""
-        self.history_list.clear()
-        for ver in sorted(self._meta_data.keys(), key=lambda x: int(x[1:])):
-            item = QListWidgetItem(f"{ver} – {self._meta_data[ver]}")
-            self.history_list.addItem(item)
-
     def save_dataset(self):
-        """Сохранение с обновлением истории"""
+        """Сохранение с использованием MetaTracker"""
         if self.df is None or self.selected_file_path is None:
             QMessageBox.warning(self, "Ошибка", "Нет данных для сохранения!")
             return
 
-        # Извлекаем базовое имя
-        file_name = os.path.splitext(os.path.basename(self.selected_file_path))[0]
-        base_name = file_name.split("_v")[0] if "_v" in file_name else file_name
-        save_path = os.path.join("dataset", f"{base_name}_v{self._version}.csv")
+        # Определяем путь: base_name_vN.csv
+        base_name = os.path.splitext(os.path.basename(self.selected_file_path))[0]
+        base_name = base_name.split("_v")[0] if "_v" in base_name else base_name
+        save_path = os.path.join("dataset", f"{base_name}_v{self.meta_tracker.version}.csv")
 
         try:
-            # Добавляем новые изменения
-            current_version = f"v{self._version}"
-            if self._pending_changes:
-                self._meta_data[current_version] = ", ".join(self._pending_changes)
+            # Сохраняем через MetaTracker
+            success = self.meta_tracker.save_to_file(save_path, self.df)
+            if success:
+                self.selected_file_path = save_path
+                self.btn_save.setEnabled(False)
+
+                # Увеличиваем версию для следующего сохранения
+                self.meta_tracker.version += 1
+
+                QMessageBox.information(
+                    self, "Сохранено",
+                    f"Датасет сохранён:\n{os.path.basename(save_path)}\n\n"
+                    f"Версия: v{self.meta_tracker.version - 1}"
+                )
             else:
-                if current_version not in self._meta_data:
-                    self._meta_data[current_version] = "без изменений"
-
-            # Формируем строку: v0|v1 изменение1|v2 изменение2
-            parts = []
-            for ver in sorted(self._meta_data.keys(), key=lambda x: int(x[1:])):
-                changes = self._meta_data[ver]
-                parts.append(f"{ver} {changes}")
-            full_content = "|".join(parts)
-            full_line = f"# META: {full_content}"
-
-            # Разбиваем на строки по 150 символов
-            max_len = 150
-            meta_lines = []
-            if len(full_line) <= max_len:
-                meta_lines.append(full_line)
-            else:
-                words = full_content.split("|")
-                current = "# META:"
-                for word in words:
-                    test = current + ("|" if current != "# META:" else " ") + word
-                    if len(test) <= max_len:
-                        if current == "# META:":
-                            current = f"# META: {word}"
-                        else:
-                            current += "|" + word
-                    else:
-                        if current != "# META:":
-                            meta_lines.append(current)
-                        current = f"# META: {word}"
-                if current != "# META:":
-                    meta_lines.append(current)
-
-            # Записываем
-            with open(save_path, "w", encoding="utf-8") as f:
-                for line in meta_lines:
-                    f.write(line + "\n")
-                self.df.to_csv(f, index=False)
-
-            # Обновляем состояние
-            self._pending_changes.clear()
-            self.selected_file_path = save_path
-            self._version += 1
-            self.btn_save.setEnabled(False)
-
-            # Обновляем историю в интерфейсе
-            self.update_history_display()
-            self.label_detail.setText("Последнее изменение сохранено.")
-
-            QMessageBox.information(
-                self, "Сохранено",
-                f"Датасет сохранён:\n{os.path.basename(save_path)}\n\n"
-                f"Теперь версия: v{self._version - 1}"
-            )
+                QMessageBox.critical(self, "Ошибка", "Не удалось сохранить файл.")
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить:\n{e}")

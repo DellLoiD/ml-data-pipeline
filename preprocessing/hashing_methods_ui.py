@@ -11,6 +11,9 @@ import pandas as pd
 import hashlib
 import random
 
+# Импорт трекера
+from utils.meta_tracker import MetaTracker
+
 
 class HashingMethodsWindow(QWidget):
     def __init__(self):
@@ -18,9 +21,8 @@ class HashingMethodsWindow(QWidget):
         self.df = None
         self.selected_column = None
         self.unique_count = 0
-        self._meta_line = "# META:"  # Для хранения строки метаданных
-        self._has_changes = False  # Контроль кнопки "Сохранить"
         self._last_loaded_path = None
+        self.meta_tracker = MetaTracker(max_line_length=150)
         self.setup_ui()
 
     def setup_ui(self):
@@ -134,11 +136,8 @@ class HashingMethodsWindow(QWidget):
         # === Кнопка сохранения ===
         self.save_btn = QPushButton("💾 Сохранить изменённый датасет")
         self.save_btn.clicked.connect(self.save_dataset)
-        self.save_btn.setEnabled(False)  # Только после изменений
+        self.save_btn.setEnabled(False)
         layout.addWidget(self.save_btn)
-
-        # === Кнопка закрытия УДАЛЕНА ===
-        # Больше не добавляем "Закрыть"
 
         self.setLayout(layout)
         self.reset_ui()
@@ -148,7 +147,6 @@ class HashingMethodsWindow(QWidget):
         self.df = None
         self.selected_column = None
         self.unique_count = 0
-        self._has_changes = False
         self.column_combo.clear()
         self.column_combo.setEnabled(False)
         self.info_label.setText("Количество уникальных значений: —")
@@ -156,7 +154,7 @@ class HashingMethodsWindow(QWidget):
         self.save_btn.setEnabled(False)
 
     def load_dataset(self):
-        """Загрузка датасета с обработкой #META"""
+        """Загрузка датасета с использованием MetaTracker"""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Выберите CSV файл", "./dataset", "CSV Files (*.csv)"
         )
@@ -164,25 +162,15 @@ class HashingMethodsWindow(QWidget):
             return
 
         try:
-            # Читаем #META строку
-            with open(file_path, 'r', encoding='utf-8') as f:
-                first_line = f.readline().strip()
-            if first_line.startswith("# META:"):
-                self._meta_line = first_line
-            else:
-                self._meta_line = "# META:"
+            # Загружаем мета-информацию
+            self.meta_tracker.load_from_file(file_path)
 
             # Читаем данные, игнорируя комментарии
             self.df = pd.read_csv(file_path, comment='#', dtype=str).fillna("")
             self._last_loaded_path = file_path
 
-            # Определяем строковые колонки (не числовой тип)
-            categorical_cols = self.df.select_dtypes(include=['object']).columns.tolist()
-            string_cols = []
-            for col in categorical_cols:
-                sample = self.df[col].dropna().astype(str).head(100)
-                if not pd.to_numeric(sample, errors='coerce').notna().all():
-                    string_cols.append(col)
+            # Определяем строковые колонки
+            string_cols = self.get_string_columns()
 
             if not string_cols:
                 QMessageBox.warning(self, "Нет данных", "В датасете нет строковых колонок для хеширования.")
@@ -191,11 +179,24 @@ class HashingMethodsWindow(QWidget):
             self.column_combo.clear()
             self.column_combo.addItems(string_cols)
             self.column_combo.setEnabled(True)
-            self.on_column_selected(string_cols[0])
+            if string_cols:
+                self.on_column_selected(string_cols[0])
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить файл:\n{e}")
             self.reset_ui()
+
+    def get_string_columns(self):
+        """Возвращает список строковых колонок"""
+        if self.df is None:
+            return []
+        categorical_cols = self.df.select_dtypes(include=['object']).columns.tolist()
+        string_cols = []
+        for col in categorical_cols:
+            sample = self.df[col].dropna().astype(str).head(100)
+            if not pd.to_numeric(sample, errors='coerce').notna().all():
+                string_cols.append(col)
+        return string_cols
 
     def on_column_selected(self, column):
         """Обновление информации при выборе колонки"""
@@ -207,13 +208,10 @@ class HashingMethodsWindow(QWidget):
         self.unique_count = len(unique_vals)
         self.info_label.setText(f"🔢 Уникальных значений: <b>{self.unique_count}</b>")
 
-        # --- ПОКАЗАТЬ 3 СЛУЧАЙНЫХ УНИКАЛЬНЫХ ЗНАЧЕНИЯ ---
         if len(unique_vals) == 0:
             self.sample_label.setText("Примеры значений: —")
         else:
-            # Выбираем до 3 случайных значений
             sample_values = pd.Series(unique_vals).sample(n=min(3, len(unique_vals)), random_state=None).tolist()
-            # Форматируем как строки в кавычках
             formatted = ", ".join(f"'{str(v)}'" for v in sample_values)
             self.sample_label.setText(f"Примеры значений: {formatted}")
 
@@ -322,10 +320,15 @@ class HashingMethodsWindow(QWidget):
             else:
                 method_desc = "неизвестный метод"
 
-            # Логируем операцию
-            self._meta_line += f", хеширована колонка '{self.selected_column}' методом {method_desc} (n={n})"
-            self._has_changes = True
+            # Записываем изменение
+            self.meta_tracker.add_change(f"хеширована колонка '{self.selected_column}' методом {method_desc} (n={n})")
+
+            # Предлагаем удалить оригинальную колонку
+            self.ask_remove_original_column()
+
+            # Обновляем UI
             self.save_btn.setEnabled(True)
+            self.update_column_list()
 
             QMessageBox.information(
                 self, "Успех",
@@ -338,65 +341,71 @@ class HashingMethodsWindow(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось применить хеширование:\n{e}")
 
-    def save_dataset(self):
-        """Сохранение датасета с обновлением #META и версионированием"""
-        if self.df is None or not self._has_changes:
+    def ask_remove_original_column(self):
+        """Спрашивает, удалить ли оригинальную колонку после хеширования"""
+        if self.selected_column not in self.df.columns:
             return
 
-        # Извлекаем имя и версию
-        original_name = "dataset.csv"
-        if self._last_loaded_path:
-            original_name = os.path.basename(self._last_loaded_path)
-
-        base_name = os.path.splitext(original_name)[0]
-        if "_v" in base_name:
-            try:
-                version = int(base_name.split("_v")[1]) + 1
-                base_name = base_name.split("_v")[0]
-            except:
-                version = 1
+        reply = QMessageBox.question(
+            self, "Удалить оригинальную колонку?",
+            f"Удалить исходную колонку '{self.selected_column}' после хеширования?"
+        )
+        if reply == QMessageBox.Yes:
+            self.df.drop(columns=[self.selected_column], inplace=True)
+            self.meta_tracker.add_change(f"удалена колонка '{self.selected_column}' после хеширования")
+            QMessageBox.information(self, "Готово", f"Колонка '{self.selected_column}' удалена.")
         else:
-            version = 1
+            self.meta_tracker.add_change(f"колонка '{self.selected_column}' сохранена после хеширования")
 
-        save_path = os.path.join("dataset", f"{base_name}_v{version}.csv")
+    def update_column_list(self):
+        """Обновляет список колонок в комбобоксе"""
+        string_cols = self.get_string_columns()
+        current_text = self.column_combo.currentText()
 
-        # Спрашиваем, удалить ли оригинальную колонку
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Удалить оригинальную колонку?")
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel(f"Удалить исходную колонку '{self.selected_column}' после хеширования?"))
-        buttons = QDialogButtonBox(QDialogButtonBox.Yes | QDialogButtonBox.No)
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        layout.addWidget(buttons)
-        dialog.setLayout(layout)
-
-        if dialog.exec() == QDialog.Accepted:
-            df_to_save = self.df.drop(columns=[self.selected_column])
-            action_log = f", удалена колонка '{self.selected_column}'"
+        self.column_combo.clear()
+        if string_cols:
+            self.column_combo.addItems(string_cols)
+            if current_text in string_cols:
+                self.column_combo.setCurrentText(current_text)
+            else:
+                self.on_column_selected(string_cols[0])
         else:
-            df_to_save = self.df.copy()
-            action_log = f", колонка '{self.selected_column}' сохранена"
+            self.column_combo.addItem("Нет строковых колонок")
+            self.column_combo.setEnabled(False)
+            self.reset_info_labels()
 
-        # Обновляем мету
-        self._meta_line += action_log
+    def reset_info_labels(self):
+        """Сбрасывает метки информации"""
+        self.info_label.setText("Количество уникальных значений: —")
+        self.sample_label.setText("Примеры значений: —")
+
+    def save_dataset(self):
+        """Сохранение через MetaTracker с версионированием"""
+        if self.df is None or self._last_loaded_path is None:
+            QMessageBox.warning(self, "Ошибка", "Нет данных для сохранения!")
+            return
+
+        base_name = os.path.splitext(os.path.basename(self._last_loaded_path))[0]
+        base_name = base_name.split("_v")[0] if "_v" in base_name else base_name
+        save_path = os.path.join("dataset", f"{base_name}_v{self.meta_tracker.version}.csv")
 
         try:
-            with open(save_path, "w", encoding="utf-8") as f:
-                f.write(self._meta_line + "\n")
-                df_to_save.to_csv(f, index=False)
+            success = self.meta_tracker.save_to_file(save_path, self.df)
+            if success:
+                self._last_loaded_path = save_path
+                self.save_btn.setEnabled(False)
+                self.meta_tracker.version += 1
 
-            QMessageBox.information(
-                self, "Сохранено",
-                f"✅ Датасет сохранён:\n{save_path}\n\n"
-                f"Версия: v{version}"
-            )
-            self.save_btn.setEnabled(False)
-            self._has_changes = False
-            self._last_loaded_path = save_path
+                QMessageBox.information(
+                    self, "Сохранено",
+                    f"✅ Датасет сохранён:\n{os.path.basename(save_path)}\n\n"
+                    f"Версия: v{self.meta_tracker.version - 1}"
+                )
+            else:
+                QMessageBox.critical(self, "Ошибка", "Не удалось сохранить файл.")
 
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить файл:\n{e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить:\n{e}")
 
     # === Реализации методов хеширования ===
 
@@ -419,6 +428,6 @@ class HashingMethodsWindow(QWidget):
             min_count = min(tables[i][hashes[i](item)] for i in range(d))
             for i in range(d):
                 tables[i][hashes[i](item)] += 1
-            counts[item] = min_count + 1  # простая аппроксимация
+            counts[item] = min_count + 1
 
         return counts

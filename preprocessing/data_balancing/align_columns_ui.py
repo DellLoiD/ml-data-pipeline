@@ -7,6 +7,9 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QFont
 
+# Импорт нового трекера
+from utils.meta_tracker import MetaTracker
+
 
 class AlignColumnsApp(QWidget):
     def __init__(self):
@@ -15,6 +18,8 @@ class AlignColumnsApp(QWidget):
         self.target_df = None
         self.reference_file_name = ""
         self.target_file_name = ""
+        self._last_loaded_path = None  # Для сохранения
+        self.meta_tracker = MetaTracker(max_line_length=150)  # Управление историей
         self.init_ui()
 
     def init_ui(self):
@@ -60,10 +65,9 @@ class AlignColumnsApp(QWidget):
         self.setLayout(layout)
         self.resize(700, 500)
         self.setWindowTitle("Выравнивание колонок датасетов")
-        self.show()
 
     def load_reference_dataset(self):
-        """Загрузка референсного датасета (образец порядка)"""
+        """Загрузка референсного датасета с использованием MetaTracker"""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Выберите референсный CSV", "./dataset/", "CSV Files (*.csv)"
         )
@@ -71,7 +75,9 @@ class AlignColumnsApp(QWidget):
             return
 
         try:
-            self.reference_df = pd.read_csv(file_path)
+            # Загружаем мета-информацию
+            self.meta_tracker.load_from_file(file_path)
+            self.reference_df = pd.read_csv(file_path, comment='#')
             self.reference_file_name = os.path.basename(file_path)
             self.ref_btn.setText(f"✅ {self.reference_file_name}")
 
@@ -80,13 +86,15 @@ class AlignColumnsApp(QWidget):
                                       f"• Колонки: {len(self.reference_df.columns)}\n"
                                       f"• Строки: {len(self.reference_df)}")
 
+            self.meta_tracker.add_change("загружен референсный датасет для выравнивания")
+
             self.check_alignment_ready()
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить референсный датасет:\n{e}")
 
     def load_target_dataset(self):
-        """Загрузка целевого датасета (который нужно выровнять)"""
+        """Загрузка целевого датасета с использованием MetaTracker"""
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Выберите целевой CSV", "./dataset/", "CSV Files (*.csv)"
         )
@@ -94,14 +102,18 @@ class AlignColumnsApp(QWidget):
             return
 
         try:
-            self.target_df = pd.read_csv(file_path)
+            self.target_df = pd.read_csv(file_path, comment='#')
             self.target_file_name = os.path.basename(file_path)
+            self._last_loaded_path = file_path  # Для последующего сохранения
+
             self.target_btn.setText(f"✅ {self.target_file_name}")
 
             self.results_text.append(f"\n🎯 Целевой датасет загружен:\n"
                                      f"• Файл: {self.target_file_name}\n"
                                      f"• Колонки: {len(self.target_df.columns)}\n"
                                      f"• Строки: {len(self.target_df)}")
+
+            self.meta_tracker.add_change("загружен целевой датасет для выравнивания")
 
             self.check_alignment_ready()
 
@@ -147,16 +159,19 @@ class AlignColumnsApp(QWidget):
                 # Удаляем лишние
                 self.target_df = self.target_df[ref_cols]
                 dropped_count = len(extra_in_target)
+                self.meta_tracker.add_change(f"удалены лишние колонки: {', '.join(extra_in_target)}")
             else:
-                # Оставляем, но в нужном порядке + оставшиеся
+                # Оставляем, но в нужном порядке
                 ordered_cols = [col for col in ref_cols if col in target_cols] + \
                                [col for col in target_cols if col not in ref_cols]
                 self.target_df = self.target_df[ordered_cols]
                 dropped_count = 0
+                self.meta_tracker.add_change(f"лишние колонки сохранены, но перемещены в конец")
         else:
             # Просто выравниваем порядок
             self.target_df = self.target_df[ref_cols]
             dropped_count = 0
+            self.meta_tracker.add_change("выровнен порядок колонок по референсному датасету")
 
         # Отчёт
         result_text = f"""
@@ -188,22 +203,30 @@ class AlignColumnsApp(QWidget):
             self.save_aligned_dataset()
 
     def save_aligned_dataset(self):
-        """Сохраняет выровненный датасет"""
+        """Сохраняет выровненный датасет с использованием MetaTracker"""
         if self.target_df is None:
             return
 
-        default_name = f"aligned_{self.target_file_name}"
-        save_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Сохранить выровненный датасет",
-            f"./dataset/{default_name}",
-            "CSV Files (*.csv)"
-        )
-        if not save_path:
-            return
+        # Определяем имя файла
+        base_name = "aligned_dataset"
+        if self._last_loaded_path:
+            name = os.path.splitext(os.path.basename(self._last_loaded_path))[0]
+            base_name = name.split("_v")[0]  # Убираем версию
+
+        save_path = os.path.join("dataset", f"{base_name}_v{self.meta_tracker.version}.csv")
 
         try:
-            self.target_df.to_csv(save_path, index=False)
-            QMessageBox.information(self, "Сохранено", f"✅ Датасет сохранён:\n{save_path}")
+            # Сохраняем через MetaTracker
+            success = self.meta_tracker.save_to_file(save_path, self.target_df)
+            if success:
+                self._last_loaded_path = save_path
+                self.meta_tracker.version += 1  # Увеличиваем версию
+                QMessageBox.information(
+                    self, "Сохранено",
+                    f"✅ Датасет сохранён:\n{os.path.basename(save_path)}\n\n"
+                    f"Версия: v{self.meta_tracker.version - 1}"
+                )
+            else:
+                QMessageBox.critical(self, "Ошибка", "Не удалось сохранить файл.")
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить файл:\n{e}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить:\n{e}")

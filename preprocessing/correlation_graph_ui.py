@@ -1,3 +1,4 @@
+# preprocessing/correlation_graph_ui.py
 import pandas as pd
 import os
 import seaborn as sns
@@ -13,16 +14,18 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QMessageBox
 )
+from utils.meta_tracker import MetaTracker  # Импорт трекера
 
 
 class CorrelationGraphUI(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('График корреляции')
-        self.df = None  # Будет инициализирован при загрузке
+        self.df = None
         self.file_name = None
-        self.removed_column = None  # Сохраняем имя удалённого столбца
-        self.meta_line = "# META:"  # Базовая строка метаданных
+        self.removed_column = None
+        self._last_loaded_path = None
+        self.meta_tracker = MetaTracker(max_line_length=150)  # Управление историей
         self.initUI()
 
     def initUI(self):
@@ -32,7 +35,7 @@ class CorrelationGraphUI(QWidget):
         btn_build_correlation_graph = QPushButton('Построить график корреляции')
         btn_remove_target_variable = QPushButton('Удалить признак')
         self.btn_save_processed_data = QPushButton('Сохранить датасет')
-        self.btn_save_processed_data.setEnabled(False)  # 🔴 Кнопка неактивна по умолчанию
+        self.btn_save_processed_data.setEnabled(False)  # Кнопка активируется после изменений
 
         self.label_dataset_status = QLabel('')
         self.combo_box_columns = QComboBox()
@@ -50,7 +53,7 @@ class CorrelationGraphUI(QWidget):
         btn_remove_target_variable.clicked.connect(self.removeTargetVariable)
         self.btn_save_processed_data.clicked.connect(self.saveProcessedData)
 
-        # Макеты элементов
+        # Макеты
         h_layout_buttons = QHBoxLayout()
         h_layout_buttons.addWidget(btn_select_dataset)
         h_layout_buttons.addWidget(btn_select_target_variable)
@@ -63,12 +66,11 @@ class CorrelationGraphUI(QWidget):
         v_layout_main.addWidget(self.combo_box_columns)
         v_layout_main.addWidget(self.class_distribution_label)
         v_layout_main.addWidget(self.info_label)
-        v_layout_main.addWidget(self.btn_save_processed_data)  # Добавляем кнопку
+        v_layout_main.addWidget(self.btn_save_processed_data)
 
         self.setLayout(v_layout_main)
 
     def selectDataset(self):
-        # Получаем абсолютный путь к текущему файлу
         current_file_path = os.path.abspath(__file__)
         project_root = os.path.dirname(os.path.dirname(current_file_path))
         start_directory = os.path.join(project_root, 'dataset')
@@ -82,28 +84,26 @@ class CorrelationGraphUI(QWidget):
 
         if file_name:
             try:
-                # Читаем первую строку — если начинается с #, сохраняем как мета
-                with open(file_name, 'r', encoding='utf-8') as f:
-                    first_line = f.readline().strip()
-                if first_line.startswith('#'):
-                    self.meta_line = first_line
-                else:
-                    self.meta_line = "# META:"
+                # Загружаем мета-информацию
+                self.meta_tracker.load_from_file(file_name)
 
-                # Загружаем данные, игнорируя строки с #
+                # Загружаем данные
                 if file_name.endswith('.csv'):
                     self.df = pd.read_csv(file_name, comment='#', skipinitialspace=True)
                 else:
                     self.df = pd.read_excel(file_name)
 
                 self.file_name = file_name
+                self._last_loaded_path = file_name
                 self.label_dataset_status.setText(f'Загружено {len(self.df)} строк.')
                 self.combo_box_columns.clear()
                 self.combo_box_columns.addItems(list(self.df.columns))
 
+                # Добавляем в историю
+                self.meta_tracker.add_change("загружен датасет для анализа корреляции")
             except Exception as e:
-                print(e)
                 self.label_dataset_status.setText('Ошибка загрузки файла.')
+                print(e)
 
     def selectTargetVariable(self):
         target_column = self.combo_box_columns.currentText()
@@ -112,7 +112,6 @@ class CorrelationGraphUI(QWidget):
             class_counts = self.df[self.target_variable].value_counts().sort_values(ascending=False)
 
             top_classes = class_counts.head(15)
-
             distribution_text = f'\n{"-" * 30}\nРаспределение записей по категориям:\n'
             distribution_text += "\n".join([f"{cls}: {cnt}" for cls, cnt in top_classes.items()])
 
@@ -134,13 +133,12 @@ class CorrelationGraphUI(QWidget):
             self.class_distribution_label.clear()
             self.label_dataset_status.setText(f"Признак '{removed_col}' удалён.")
 
-            # ✅ Обновляем мета-информацию
-            self.meta_line += f" удалён признак '{removed_col}'"
+            # Добавляем в историю
+            self.meta_tracker.add_change(f"удалён признак '{removed_col}'")
 
-            # ✅ Активируем кнопку сохранения
+            # Активируем кнопку сохранения
             self.btn_save_processed_data.setEnabled(True)
 
-            # Сохраняем имя удалённого столбца (для логики, если нужно)
             self.removed_column = removed_col
         else:
             self.label_dataset_status.setText("Ничего не выбрано для удаления.")
@@ -150,14 +148,11 @@ class CorrelationGraphUI(QWidget):
             self.label_dataset_status.setText('Сначала выберите датасет!')
             return
 
-        # Оставляем только числовые столбцы
         numeric_df = self.df.select_dtypes(include=['number', 'Int64'])
-
         if numeric_df.empty:
             QMessageBox.warning(self, "Внимание", "Нет числовых столбцов для построения корреляции.")
             return
 
-        # Сообщаем игнорируемые столбцы
         all_cols = set(self.df.columns)
         num_cols = set(numeric_df.columns)
         cat_cols = all_cols - num_cols
@@ -170,7 +165,6 @@ class CorrelationGraphUI(QWidget):
                 f"Игнорируются: {ignored_list}"
             )
 
-        # Строим график
         plt.figure(figsize=(12, 9))
         sns.heatmap(numeric_df.corr(), annot=True, cmap='coolwarm', fmt=".2f", square=True)
         plt.title('Матрица корреляций', fontsize=16)
@@ -182,25 +176,28 @@ class CorrelationGraphUI(QWidget):
             self.label_dataset_status.setText('Нет загруженного датасета для сохранения.')
             return
 
-        project_dir = os.getcwd()
-        output_folder = os.path.join(project_dir, 'dataset')
-        os.makedirs(output_folder, exist_ok=True)
-
-        input_filename = os.path.basename(self.file_name)
-        output_path = os.path.join(output_folder, input_filename)
-
         try:
-            # 🔽 Сохраняем с мета-строкой в первой строке
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(self.meta_line + "\n")  # Первая строка — мета
-                self.df.to_csv(f, index=False)  # Остальные — данные
+            # Определяем базовое имя
+            base_name = "correlation_processed"
+            if self._last_loaded_path:
+                name = os.path.splitext(os.path.basename(self._last_loaded_path))[0]
+                base_name = name.split("_v")[0]
 
-            self.label_dataset_status.setText(f'Датасет успешно сохранён в {output_path}')
-            self.btn_save_processed_data.setEnabled(False)  # После сохранения можно отключить
+            save_path = os.path.join("dataset", f"{base_name}_v{self.meta_tracker.version}.csv")
+
+            # Сохраняем через MetaTracker
+            success = self.meta_tracker.save_to_file(save_path, self.df)
+            if success:
+                self._last_loaded_path = save_path
+                self.meta_tracker.version += 1
+                self.label_dataset_status.setText(f'✅ Датасет сохранён: {os.path.basename(save_path)}')
+                self.btn_save_processed_data.setEnabled(False)
+            else:
+                self.label_dataset_status.setText('Ошибка при сохранении.')
 
         except Exception as e:
-            print(e)
             self.label_dataset_status.setText('Ошибка при сохранении файла.')
+            print(e)
 
 
 if __name__ == '__main__':
