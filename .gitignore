@@ -41,12 +41,6 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Data and models (large/binary)
-dataset/
-trained_models/
-plots/
-accuracy_reports_tested_models/
-
 # Логи
 *.log
 logs/
