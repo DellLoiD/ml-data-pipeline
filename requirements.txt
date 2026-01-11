@@ -1,0 +1,11 @@
+# Основные зависимости
+PySide6
+pandas
+numpy
+scikit-learn
+joblib
+category-encoders
+
+# Дополнительно
+matplotlib 
+seaborn  

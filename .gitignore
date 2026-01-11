@@ -3,18 +3,39 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.Python
+*.so
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache
+.coverage
+coverage.xml
+nosetests.xml
+hypothesis/
+*.pyc
+*.pyo
+*.pyd
 *.egg-info/
 .eggs/
 
-# Virtual environments
-.venv/
+# Виртуальное окружение
 venv/
+.venv/
+env/
 ENV/
 
 # IDE/Editor
 .vscode/
 .idea/
 *.code-workspace
+*.swp
+*.swo
+
+# Данные
+*.csv
+*.xlsx
+*.pkl
+*.joblib
 
 # OS files
 .DS_Store
@@ -26,8 +47,9 @@ trained_models/
 plots/
 accuracy_reports_tested_models/
 
-# Logs and reports
+# Логи
 *.log
+logs/
 report.txt
 
 # Cache
