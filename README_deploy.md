@@ -1,13 +1,12 @@
 ## 🔧 Как запустить проект
 
 1. Клонируй репозиторий:
-   ```bash
    git clone https://github.com/ваш-аккаунт/ml-data-pipeline.git
    cd ml-data-pipeline
 Создай виртуальное окружение:
 
-bash
 python -m venv venv
+
 Активируй его:
 
 bash
@@ -16,11 +15,11 @@ source venv/bin/activate
 
 # Windows:
 venv\Scripts\activate
+
 Установи зависимости:
 
 bash
 pip install -r requirements.txt
 Запусти приложение:
 
-bash
-python src/dataset_processing_fix_non_numeric_ui.py
+
