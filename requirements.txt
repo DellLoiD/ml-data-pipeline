@@ -1,11 +1,29 @@
-# Основные зависимости
-PySide6
-pandas
-numpy
-scikit-learn
-joblib
-category-encoders
+# === Ядро ===
+python>=3.9
+PySide6>=6.7.0
+pandas>=2.0.0
+numpy>=1.21.0
+scikit-learn>=1.3.0
+joblib>=1.3.0
 
-# Дополнительно
-matplotlib 
-seaborn  
+# === ML и предобработка ===
+category-encoders>=2.6.0
+imbalanced-learn>=0.10.0  # для SMOTE, RandomUnderSampler, NearMiss и др.
+scipy>=1.10.0             # часто требуется для sklearn
+
+# === Визуализация ===
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# === Работа с файлами ===
+openpyxl>=3.1.0           # для .xlsx
+xlrd>=2.0.1               # для .xls (если нужно)
+pyarrow>=12.0.0           # для быстрой загрузки .parquet (если будешь использовать)
+
+# === Опционально, но полезно ===
+tqdm>=4.66.0              # для прогресс-баров
+colorama                  # для цветного вывода в консоль (Windows)
+
+# === Для документации / демо (опционально) ===
+jupyter                   # если будешь писать демо-ноутбуки
+notebook
