@@ -1,5 +1,4 @@
 # === Ядро ===
-python>=3.9
 PySide6>=6.7.0
 pandas>=2.0.0
 numpy>=1.21.0
