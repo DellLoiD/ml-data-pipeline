@@ -18,30 +18,50 @@
 ## 🪟 Windows (любой терминал)
 
 1. Откройте командную строку, PowerShell или терминал в вашей IDE
+
 2. Клонируйте репозиторий:
+3. 
    git clone https://github.com/ваш-аккаунт/ml-data-pipeline.git
+   
    cd ml-data-pipeline
+   
 Создайте и активируйте виртуальное окружение:
+
 python -m venv venv
+
 venv\Scripts\activate
+
 Установите зависимости:
+
 pip install -r requirements.txt
+
 Запустите приложение:
-python src/main_window_ui.py
+
+python main_window_ui.py
 
 ## 🚀 Как запустить (Linux)
+
 🐧 Linux / 🍏 macOS
+
 Откройте терминал
 
 Клонируйте репозиторий:
+
 git clone https://github.com/ваш-аккаунт/ml-data-pipeline.git
+
 cd ml-data-pipeline
 Создайте и активируйте виртуальное окружение:
+
 python3 -m venv venv
+
 source venv/bin/activate
+
 Установите зависимости:
+
 pip install -r requirements.txt
+
 Запустите приложение:
+
 python src/main_window_ui.py
 
 ## 🚀 Как запустить в VS Code 
