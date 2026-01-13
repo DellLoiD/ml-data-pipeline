@@ -37,7 +37,7 @@ pip install -r requirements.txt
 
 Запустите приложение:
 
-python src/main_window_ui.py
+python main_window_ui.py
 
 ## 🚀 Как запустить (Linux)
 
