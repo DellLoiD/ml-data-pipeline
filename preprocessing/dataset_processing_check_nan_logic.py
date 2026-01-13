@@ -114,14 +114,14 @@ def impute_hot_deck(df: pd.DataFrame, column: str, parent=None) -> tuple[pd.Data
         progress_dialog = QDialog(parent)
         progress_dialog.setModal(True)
         progress_dialog.setWindowTitle("Hot Deck — восстановление пропусков")
-        progress_dialog.setWindowFlags(progress_dialog.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        progress_dialog.setWindowFlags(progress_dialog.windowFlags() & ~Qt.WindowContextHelpButtonHint) # type: ignore
         progress_dialog.resize(400, 150)
         progress_dialog.move(parent.geometry().center() - progress_dialog.rect().center())
 
         layout = QVBoxLayout()
         label = QLabel("1/4: Поиск похожих строк...\nПодготовка данных...")
         label.setWordWrap(True)
-        label.setAlignment(Qt.AlignCenter)
+        label.setAlignment(Qt.AlignCenter) # type: ignore
         layout.addWidget(label)
         progress_dialog.setLayout(layout)
         progress_dialog.show()
@@ -132,7 +132,7 @@ def impute_hot_deck(df: pd.DataFrame, column: str, parent=None) -> tuple[pd.Data
 
     # === Разделяем признаки ===
     if progress_dialog:
-        label.setText("2/4: Разделение признаков на числовые и категориальные...")
+        label.setText("2/4: Разделение признаков на числовые и категориальные...") # type: ignore
         QApplication.processEvents()
 
     numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
@@ -146,7 +146,7 @@ def impute_hot_deck(df: pd.DataFrame, column: str, parent=None) -> tuple[pd.Data
 
     # === Нормализуем числовые ===
     if progress_dialog:
-        label.setText("3/4: Нормализация числовых признаков...")
+        label.setText("3/4: Нормализация числовых признаков...") # type: ignore
         QApplication.processEvents()
 
     if not X_numeric.empty:
@@ -163,7 +163,7 @@ def impute_hot_deck(df: pd.DataFrame, column: str, parent=None) -> tuple[pd.Data
     complete_target_mask = df[column].notna()
     if complete_target_mask.sum() == 0:
         if progress_dialog:
-            label.setText("❌ Ошибка: нет строк с заполненным значением.")
+            label.setText("❌ Ошибка: нет строк с заполненным значением.") # type: ignore
             QApplication.processEvents()
             progress_dialog.close()
         raise ValueError(f"Нет строк с заполненным значением в колонке '{column}' — невозможно применить Hot Deck.")
@@ -175,7 +175,7 @@ def impute_hot_deck(df: pd.DataFrame, column: str, parent=None) -> tuple[pd.Data
     total_missing = len(missing_idx)
 
     if progress_dialog:
-        label.setText(f"4/4: Поиск доноров...\nВосстановлено: 0 из {total_missing}")
+        label.setText(f"4/4: Поиск доноров...\nВосстановлено: 0 из {total_missing}") # type: ignore
         QApplication.processEvents()
 
     for i, idx in enumerate(missing_idx):
@@ -213,12 +213,12 @@ def impute_hot_deck(df: pd.DataFrame, column: str, parent=None) -> tuple[pd.Data
 
         # === Обновляем счётчик ===
         if progress_dialog and (i + 1) % 3 == 0:
-            label.setText(f"4/4: Поиск доноров...\nВосстановлено: {filled_count} из {total_missing}")
+            label.setText(f"4/4: Поиск доноров...\nВосстановлено: {filled_count} из {total_missing}") # type: ignore
             QApplication.processEvents()
 
     # === Завершение ===
     if progress_dialog:
-        label.setText(f"✅ Готово!\nВосстановлено: {filled_count} значений")
+        label.setText(f"✅ Готово!\nВосстановлено: {filled_count} значений") # type: ignore
         QApplication.processEvents()
         time.sleep(1.5)
         progress_dialog.close()
