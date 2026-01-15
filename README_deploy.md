@@ -42,7 +42,7 @@ python main_window_ui.py
 ## 🎬 Видео: как скачать проект
 
 <video width="800" height="450" controls>
-  <source src="video_readme/как%20скачать.mp4" type="video/mp4">
+  <source src="video_readme/how_download.mp4" type="video/mp4">
   Ваш браузер не поддерживает воспроизведение видео.
 </video>
 

@@ -23,7 +23,7 @@
 Начните с загрузки CSV-файла. Программа автоматически определит колонки и типы данных.
 
 <video width="900" height="500" controls>
-  <source src="video_readme/загрузка%20датасета.mp4" type="video/mp4">
+  <source src="video_readme/loading_dataset.mp4" type="video/mp4">
   Ваш браузер не поддерживает воспроизведение видео.
 </video>
 
@@ -33,7 +33,7 @@
 Добавьте `.txt` или `.md` файл с описанием колонок — он будет отображаться в интерфейсе для удобства командной работы.
 
 <video width="900" height="500" controls>
-  <source src="video_readme/загрузка%20текстового%20описания%20датасета%20в%20проект.mp4" type="video/mp4">
+  <source src="video_readme/loading_dataset_description.mp4" type="video/mp4">
   Ваш браузер не поддерживает воспроизведение видео.
 </video>
 
@@ -58,7 +58,7 @@
 Просмотрите распределение категориальных признаков и удалите неинформативные или редкие категории.
 
 <video width="900" height="500" controls>
-  <source src="video_readme/анализ%20датасета%20и%20удаление%20категории.mp4" type="video/mp4">
+  <source src="video_readme/category_analysis_and_removal.mp4" type="video/mp4">
   Ваш браузер не поддерживает воспроизведение видео.
 </video>
 
@@ -68,7 +68,7 @@
 Выберите стратегию заполнения NaN: среднее, медиана, мода или обучение модели для предсказания пропусков.
 
 <video width="900" height="500" controls>
-  <source src="video_readme/обработка%20пропусков%20в%20датасете.mp4" type="video/mp4">
+  <source src="video_readme/handling_missing_values.mp4" type="video/mp4">
   Ваш браузер не поддерживает воспроизведение видео.
 </video>
 
@@ -78,7 +78,7 @@
 Преобразуйте категориальные признаки с высокой кардинальностью (например, города) в числовые векторы с помощью **Feature Hashing**.
 
 <video width="900" height="500" controls>
-  <source src="video_readme/хеширование%20строковых%20данных.mp4" type="video/mp4">
+  <source src="video_readme/string_data_hashing.mp4" type="video/mp4">
   Ваш браузер не поддерживает воспроизведение видео.
 </video>
 
@@ -88,7 +88,7 @@
 Автоматическое преобразование текстовых колонок: кодирование, очистка, нормализация — всё в одном интерфейсе.
 
 <video width="900" height="500" controls>
-  <source src="video_readme/обработка%20текстовых%20значений.mp4" type="video/mp4">
+  <source src="video_readme/text_value_processing.mp4" type="video/mp4">
   Ваш браузер не поддерживает воспроизведение видео.
 </video>
 
