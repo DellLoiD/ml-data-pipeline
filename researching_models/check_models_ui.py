@@ -4,9 +4,9 @@ import pandas as pd
 import os
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QApplication,
-    QComboBox, QCheckBox, QFileDialog, QMessageBox, QGroupBox
+    QComboBox, QCheckBox, QFileDialog, QMessageBox, QGroupBox, QButtonGroup, QRadioButton
 )
-from PySide6.QtGui import QFont, QClipboard
+from PySide6.QtGui import QFont
 from PySide6.QtCore import Qt
 
 from .check_models_logic import DataModelHandler
@@ -16,9 +16,10 @@ class ClassificationApp(QWidget):
     def __init__(self):
         super().__init__()
         self.dataset_file_name = ""
-        self.checkboxes = []
+        self.checkboxes = []  # Все чекбоксы
         self.labels_and_lines = {}
         self.report_text = ""  # Для хранения текста отчёта
+        self.selected_task = None  # "classification" или "regression"
         self.init_ui()
 
     def init_ui(self):
@@ -30,9 +31,28 @@ class ClassificationApp(QWidget):
         title_label.setFont(QFont("Arial", 14, QFont.Bold))
         main_layout.addWidget(title_label)
 
+        # === Выбор типа задачи ===
+        task_layout = QHBoxLayout()
+        task_layout.addWidget(QLabel("Тип задачи:"))
+        self.classification_radio = QRadioButton("Классификация")
+        self.regression_radio = QRadioButton("Регрессия")
+        self.classification_radio.setChecked(False)
+        self.regression_radio.setChecked(False)
+
+        self.task_group = QButtonGroup()
+        self.task_group.addButton(self.classification_radio, 1)
+        self.task_group.addButton(self.regression_radio, 2)
+        self.task_group.buttonClicked.connect(self.on_task_selected)
+
+        task_layout.addWidget(self.classification_radio)
+        task_layout.addWidget(self.regression_radio)
+        task_layout.addStretch()
+        main_layout.addLayout(task_layout)
+
         # === Кнопка выбора датасета ===
         self.select_dataset_btn = QPushButton("Выбрать датасет")
         self.select_dataset_btn.clicked.connect(self.on_select_dataset_clicked)
+        self.select_dataset_btn.setEnabled(False)
         main_layout.addWidget(self.select_dataset_btn)
 
         # === Выбор целевой переменной ===
@@ -48,24 +68,25 @@ class ClassificationApp(QWidget):
         models_layout = QVBoxLayout()
 
         # --- Классификация ---
-        classification_box = QGroupBox("Классификация")
+        self.classification_box = QGroupBox("Классификация")
         self.classification_layout = QVBoxLayout()
-        classification_box.setLayout(self.classification_layout)
-        models_layout.addWidget(classification_box)
+        self.classification_box.setLayout(self.classification_layout)
+        models_layout.addWidget(self.classification_box)
 
         # --- Регрессия ---
-        regression_box = QGroupBox("Регрессия")
+        self.regression_box = QGroupBox("Регрессия")
         self.regression_layout = QVBoxLayout()
-        regression_box.setLayout(self.regression_layout)
-        models_layout.addWidget(regression_box)
+        self.regression_box.setLayout(self.regression_layout)
+        models_layout.addWidget(self.regression_box)
 
         models_group.setLayout(models_layout)
         main_layout.addWidget(models_group)
 
         # === Кнопка оценки ===
-        evaluate_models_btn = QPushButton('Оценить выбранные модели')
-        evaluate_models_btn.clicked.connect(self.on_evaluate_models_clicked)
-        main_layout.addWidget(evaluate_models_btn)
+        self.evaluate_models_btn = QPushButton('Оценить выбранные модели')
+        self.evaluate_models_btn.clicked.connect(self.on_evaluate_models_clicked)
+        self.evaluate_models_btn.setEnabled(False)
+        main_layout.addWidget(self.evaluate_models_btn)
 
         # === Результаты ===
         results_group = QGroupBox("Результаты оценки моделей")
@@ -100,19 +121,50 @@ class ClassificationApp(QWidget):
             labels_and_lines=self.labels_and_lines,
             accuracy_label=self.metrics_container,
             time_label=self.time_label,
-            task_type="both"
+            task_type="classification"  # Временно, будет обновлён
         )
 
-        # === Заполняем UI ===
+        # === Создаём модели (скрыты до выбора задачи) ===
         self.create_classification_models()
         self.create_regression_models()
         self.create_importance_checkboxes()
 
+        # === Управление видимостью ===
+        self.classification_box.setVisible(False)
+        self.regression_box.setVisible(False)
+
         # === Финальные настройки ===
         self.setLayout(main_layout)
         self.resize(900, 800)
-        self.setWindowTitle("Оценка моделей — Все задачи")
+        self.setWindowTitle("Оценка моделей — Выбор задачи")
         self.show()
+
+    def on_task_selected(self):
+        """Обработка выбора задачи пользователем"""
+        if self.classification_radio.isChecked():
+            self.selected_task = "classification"
+        elif self.regression_radio.isChecked():
+            self.selected_task = "regression"
+        else:
+            return
+
+        # Обновляем task_type у обработчика
+        self.data_handler.task_type = self.selected_task
+
+        # Показываем только нужные модели
+        self.classification_box.setVisible(self.selected_task == "classification")
+        self.regression_box.setVisible(self.selected_task == "regression")  # ✅ Исправлено: "regression" латиницей
+
+        # Снимаем все галочки
+        for checkbox in self.checkboxes:
+            checkbox.setChecked(False)
+
+        # Включаем кнопки
+        self.select_dataset_btn.setEnabled(True)
+        self.evaluate_models_btn.setEnabled(True)
+
+        # Обновляем layout
+        self.update()
 
     def create_classification_models(self):
         """Создаёт UI для моделей классификации"""
@@ -134,7 +186,7 @@ class ClassificationApp(QWidget):
         for model_name, params in models.items():
             hbox = QHBoxLayout()
             cb = QCheckBox(model_name)
-            cb.setChecked("Random Forest" in model_name)
+            cb.setChecked(False)  # Никакие галочки по умолчанию
             self.checkboxes.append(cb)
             hbox.addWidget(cb)
 
@@ -149,6 +201,8 @@ class ClassificationApp(QWidget):
                 lines[param_name] = le
             self.labels_and_lines[model_name] = lines
             self.classification_layout.addLayout(hbox)
+
+        self.classification_box.setLayout(self.classification_layout)
 
     def create_regression_models(self):
         """Создаёт UI для моделей регрессии"""
@@ -166,7 +220,7 @@ class ClassificationApp(QWidget):
         for model_name, params in models.items():
             hbox = QHBoxLayout()
             cb = QCheckBox(model_name)
-            cb.setChecked("Random Forest" in model_name)
+            cb.setChecked(False)  # Никакие галочки по умолчанию
             self.checkboxes.append(cb)
             hbox.addWidget(cb)
 
@@ -182,28 +236,30 @@ class ClassificationApp(QWidget):
             self.labels_and_lines[model_name] = lines
             self.regression_layout.addLayout(hbox)
 
+        self.regression_box.setLayout(self.regression_layout)
+
     def create_importance_checkboxes(self):
         """Создаёт чекбоксы для анализа важности"""
         layout = QHBoxLayout()
 
         self.rfc_cb = QCheckBox("Random Forest Classification")
-        self.rfc_cb.setChecked(True)
+        self.rfc_cb.setChecked(False)
         layout.addWidget(self.rfc_cb)
 
         self.gbc_cb = QCheckBox("Gradient Boosting Classification")
-        self.gbc_cb.setChecked(True)
+        self.gbc_cb.setChecked(False)
         layout.addWidget(self.gbc_cb)
 
         self.lrc_cb = QCheckBox("Logistic Regression Classification")
-        self.lrc_cb.setChecked(True)
+        self.lrc_cb.setChecked(False)
         layout.addWidget(self.lrc_cb)
 
         self.rfr_cb = QCheckBox("Random Forest Regression")
-        self.rfr_cb.setChecked(True)
+        self.rfr_cb.setChecked(False)
         layout.addWidget(self.rfr_cb)
 
         self.gbr_cb = QCheckBox("Gradient Boosting Regression")
-        self.gbr_cb.setChecked(True)
+        self.gbr_cb.setChecked(False)
         layout.addWidget(self.gbr_cb)
 
         layout.addStretch()
@@ -218,7 +274,8 @@ class ClassificationApp(QWidget):
         file_path, _ = QFileDialog.getOpenFileName(self, "Выберите файл CSV", "./dataset/", "CSV Files (*.csv)")
         if file_path:
             try:
-                df = pd.read_csv(file_path)
+                # ✅ Добавлен параметр comment='#' — игнорирует строки, начинающиеся с #
+                df = pd.read_csv(file_path, comment='#')
                 self.dataset_file_name = os.path.basename(file_path)
                 self.select_dataset_btn.setText(f"📁 {self.dataset_file_name}")
                 self.data_handler.update_dataframe(df)
@@ -234,10 +291,14 @@ class ClassificationApp(QWidget):
         if self.target_var_combobox.currentText() == "":
             QMessageBox.warning(self, "Предупреждение", "Выберите целевую переменную!")
             return
+
+        # Галочки уже выбраны пользователем
         self.data_handler.evaluate_models()
 
     def on_show_feature_importance(self):
         selected_models = {}
+
+        # Только активные модели могут быть выбраны
         if self.rfc_cb.isChecked():
             selected_models['Random Forest Classification'] = True
         if self.gbc_cb.isChecked():
@@ -254,44 +315,41 @@ class ClassificationApp(QWidget):
         else:
             QMessageBox.warning(self, "Ошибка", "Выберите хотя бы одну модель для анализа!")
 
-    def update_metrics_display(self, report_lines):
+    def update_metrics_display(self, report_lines, task_type="classification"):
         """Обновляет отображение метрик — удаляет старые, добавляет новые"""
-        # === Очищаем старые метрики ===
         while self.metrics_container.count():
             child = self.metrics_container.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
             elif child.layout():
-                # Очистка вложенных лэйаутов
                 while child.layout().count():
                     subchild = child.layout().takeAt(0)
                     if subchild.widget():
                         subchild.widget().deleteLater()
 
-        # === Формируем текст отчёта для копирования ===
         self.report_text = ""
+
+        if task_type == "regression":
+            metrics_to_show = ["R²", "MSE", "MAE"]
+        else:
+            metrics_to_show = ["Precision", "Recall", "F1-Score", "ROC-AUC"]
 
         for line in report_lines:
             if not line.strip():
                 continue
-            # Добавляем в отображение
+
             model_label = QLabel(line)
             model_label.setTextFormat(Qt.RichText)
             self.metrics_container.addWidget(model_label)
 
-            # Добавляем в текст для копирования
             clean_line = line.replace("<b>", "").replace("</b>", "").replace("<br>", "\n  ")
             self.report_text += clean_line + "\n\n"
-
-            # Определяем, какие метрики показывать
-            metrics_to_show = ["R²", "MSE", "MAE"] if "R²" in line else ["Precision", "Recall", "F1-Score", "ROC-AUC"]
 
             for metric in metrics_to_show:
                 self.add_metric_row(metric, line)
 
             self.metrics_container.addWidget(self.create_separator())
 
-        # Добавляем время выполнения
         self.report_text += self.time_label.text()
 
     def add_metric_row(self, metric_name, line):
@@ -368,10 +426,7 @@ class ClassificationApp(QWidget):
         if not self.report_text.strip():
             QMessageBox.information(self, "Копирование", "Нет данных для копирования.")
             return
-        
-        clipboard = QApplication.clipboard()  # Импортируем ниже
+
+        clipboard = QApplication.clipboard()
         clipboard.setText(self.report_text)
         QMessageBox.information(self, "Копирование", "Результаты скопированы в буфер обмена!")
-
-    # Если не импортирован QApplication — добавь в начало файла:
-    # from PySide6.QtWidgets import QApplication

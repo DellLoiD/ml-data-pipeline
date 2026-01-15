@@ -16,11 +16,6 @@ from PySide6.QtWidgets import QMessageBox, QLineEdit
 from PySide6.QtCore import QThread, Signal
 from .check_models_loading_screen import LoadingScreen
 from datetime import datetime
-import logging
-
-# Настройка логирования
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
 
 
 # === Поток для оценки моделей ===
@@ -249,7 +244,9 @@ class DataModelHandler:
 
         self.time_label.setText(time_text)
         if hasattr(self.parent, 'update_metrics_display'):
-            self.parent.update_metrics_display(report_lines)
+            # ✅ Передаём task_type
+            self.parent.update_metrics_display(report_lines, task_type=self.task_type)
+
 
     def on_evaluation_error(self, error_msg):
         if self.splash:

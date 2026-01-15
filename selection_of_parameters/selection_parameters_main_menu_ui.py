@@ -8,18 +8,6 @@ from PySide6.QtWidgets import (
     QFileDialog, QMessageBox, QDialog, QLabel, QInputDialog,
     QScrollArea, QHBoxLayout, QRadioButton, QButtonGroup
 )
-import logging
-
-# Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('parameter_tuning.log'),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-logger = logging.getLogger(__name__)
 
 # Импортируем ваши оконные модули
 from selection_of_parameters.selection_of_parameters_ui import HyperParameterOptimizerGUI
@@ -109,7 +97,7 @@ class MainWindow_selection_parameters(QWidget):
         layout.addWidget(btn_show_params)
 
         # === Выбор модели ===
-        label_model_choice = QLabel("Выбор модели:", font=QFont('Arial', 12))
+        label_model_choice = QLabel("Выбор модели:", font=QFont('Arial', 12)) # type: ignore
         layout.addWidget(label_model_choice)
 
         self.model_combo_box = QComboBox()
@@ -248,8 +236,8 @@ class MainWindow_selection_parameters(QWidget):
 
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded) # type: ignore
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded) # type: ignore
 
         content_widget = QWidget()
         layout = QVBoxLayout(content_widget)
@@ -275,7 +263,7 @@ class MainWindow_selection_parameters(QWidget):
                 grid_text += "<br>"
 
             label1 = QLabel(grid_text)
-            label1.setTextFormat(Qt.RichText)
+            label1.setTextFormat(Qt.RichText) # type: ignore
             label1.setWordWrap(True)
             label1.setStyleSheet("font-family: 'Courier New'; font-size: 11px; padding: 8px; background-color: #f9f9f9;")
             layout.addWidget(label1)
@@ -291,7 +279,7 @@ class MainWindow_selection_parameters(QWidget):
                 search_text += f"<b>{key}:</b> {formatted_value}<br>"
 
             label2 = QLabel(search_text)
-            label2.setTextFormat(Qt.RichText)
+            label2.setTextFormat(Qt.RichText) # type: ignore
             label2.setWordWrap(True)
             label2.setStyleSheet("font-family: 'Courier New'; font-size: 11px; padding: 8px; background-color: #f9f9f9;")
             layout.addWidget(label2)
@@ -346,18 +334,7 @@ class MainWindow_selection_parameters(QWidget):
         )
 
         self.parameter_window.setGeometry(100, 100, 800, 700)
-        self.parameter_window.setWindowModality(Qt.NonModal)
+        self.parameter_window.setWindowModality(Qt.NonModal) # type: ignore
         self.parameter_window.show()
         self.parameter_window.start_tuning()
         QApplication.processEvents()
-
-
-if __name__ == '__main__':
-    logger.info("Starting application...")
-    app = QApplication(sys.argv)
-    logger.info("QApplication created")
-    main_win = MainWindow_selection_parameters()
-    logger.info("MainWindow created")
-    main_win.show()
-    logger.info("MainWindow shown")
-    sys.exit(app.exec())

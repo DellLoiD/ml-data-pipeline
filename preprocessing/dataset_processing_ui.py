@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QApplication, QWidget, QPushButton, QVBoxLayout, QMessageBox
 
-from preprocessing.dataset_processing_fix_non_numeric_ui import OneHotEncodingWindow
+from preprocessing.dataset_processing_fix_non_numeric_ui import FixNonNumericWindow
 from preprocessing.dataset_processing_check_nan import MissingValuesDialog
 
 One_Hot_Encoding_Window_instance = None
@@ -38,7 +38,7 @@ class DatasetProcessingWindow(QWidget):
     def on_check_data_values_clicked(self):
         global One_Hot_Encoding_Window_instance
         if not One_Hot_Encoding_Window_instance or not One_Hot_Encoding_Window_instance.isVisible():
-            One_Hot_Encoding_Window_instance = OneHotEncodingWindow()
+            One_Hot_Encoding_Window_instance = FixNonNumericWindow()
             One_Hot_Encoding_Window_instance.show()
 
 if __name__ == "__main__":

@@ -9,12 +9,9 @@ import os
 import joblib
 import pandas as pd
 import math
-import logging
 from pathlib import Path
 
-# Настройка логгера
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+
 
 class SurveyForm(QWidget):
     def __init__(self):

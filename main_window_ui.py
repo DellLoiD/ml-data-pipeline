@@ -1,8 +1,18 @@
-# training_window.py
+# main_window_ui.py
 import sys
-from PySide6.QtWidgets import (
-    QApplication, QWidget, QPushButton, QVBoxLayout, QGroupBox
+import logging  # ✅ Импортируем logging в начале
+
+# === НАСТРОЙКА ЛОГИРОВАНИЯ — ДО ВСЕХ ИМПОРТОВ МОДУЛЕЙ ===
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('parameter_tuning.log', encoding='utf-8'),
+        logging.StreamHandler()  # Показывает логи в терминале
+    ]
 )
+# ==============================================
+from PySide6.QtWidgets import (QApplication, QWidget, QPushButton, QVBoxLayout, QGroupBox)
 
 # === Импорт всех модулей ===
 from preprocessing.dataset_processing_check_nan import MissingValuesDialog
@@ -186,6 +196,7 @@ class TrainingWindow(QWidget):
 
 # === Запуск приложения ===
 if __name__ == "__main__":
+    
     app = QApplication(sys.argv)
 
     window = TrainingWindow()
