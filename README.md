@@ -41,10 +41,10 @@ python main_window_ui.py
 
 ## 🎬 Видео: как скачать проект
 
-<video width="800" height="450" controls>
-  <source src="video_readme/how_download.mp4" type="video/mp4">
-  Ваш браузер не поддерживает воспроизведение видео.
-</video>
+[![Видео: как скачать проект](https://img.youtube.com/vi/CCHu2UsAMZI/0.jpg)](https://youtu.be/CCHu2UsAMZI)
+
+> 🔗 [Смотреть на YouTube: "Как скачать проект"](https://youtu.be/CCHu2UsAMZI)
+
 
 # 🧰 ml-data-pipeline (альфа-версия)
 
