@@ -1,12 +1,3 @@
-Я загрузил видео  на  ютуб и сделал доступ по ссылке. Вот названия роликов, их порядок  иссылки на видео с ютуба:
-0. how download : https://youtu.be/CCHu2UsAMZI
-1. loading dataset : https://youtu.be/4h6P5l6UYtk
-2. loading dataset description : https://youtu.be/sQKUiglYbME
-3. category analysis and removal : https://youtu.be/LgKlhTkjEvw
-4. handling missing values : https://youtu.be/uqWXdJD-Hew
-5. string data hashing : https://youtu.be/KSJB7vLCOI4
-6. text value processing : https://youtu.be/fFhVDJnIKH8
-Поменяй код ссылок на  видео и объедени README_deploy.md и README.md:
 # 🚀 Инструкция по запуску проекта
 
 Этот проект можно запустить на любой ОС: **Windows**, **Linux**, **macOS**.  
