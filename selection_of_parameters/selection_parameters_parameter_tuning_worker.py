@@ -19,36 +19,90 @@ class ParameterTuningWorker(QThread):
     progress_updated = Signal(float, int, int)
     tuning_completed = Signal(object, dict, float, str)
     error_occurred = Signal(str)
-    info_message = Signal(str)  # ✅ Новый сигнал для уведомлений
+    info_message = Signal(str) 
 
-    def __init__(self, parent=None, dataset_path=None, target_variable=None, model_type="", task_type="classification"):
+    def __init__(self, parent=None, dataset_path=None, target_variable=None, model_type="", task_type="classification",
+                 df=None, df_train=None, df_test=None):
         super().__init__(parent)
         self.dataset_path = dataset_path
         self.target_variable = target_variable
         self.model_type = model_type
         self.task_type = task_type
+        self.df = df
+        self.df_train = df_train
+        self.df_test = df_test
         self._is_running = False
+        self._should_stop = False 
+        
+    def stop(self):
+        """
+        Мягкая остановка потока. Вызывается из GUI.
+        """
+        self._should_stop = True
+        self.info_message.emit("Остановка по запросу пользователя...")
 
     def run(self):
         if self._is_running:
             logger.warning("ParameterTuningWorker уже запущен — пропуск.")
             return
         self._is_running = True
+        self._should_stop = False  # Сброс флага
 
         try:
             logger.info("=== Запуск подбора гиперпараметров ===")
 
-            # === 1. Загрузка данных ===
-            df = pd.read_csv(self.dataset_path)
-            if self.target_variable not in df.columns:
-                raise ValueError(f"Целевая переменная '{self.target_variable}' не найдена")
+            # Проверка прерывания перед началом
+            if self._should_stop:
+                self.error_occurred.emit("Обучение отменено до начала.")
+                return
 
-            X = df.drop(columns=[self.target_variable])
-            y = df[self.target_variable].copy()
+            # === 1. Загрузка данных ===
+            X_train, X_test, y_train, y_test = None, None, None, None
+
+            # 🔹 Сценарий 1: переданы df_train и df_test
+            if self.df_train is not None and self.df_test is not None:
+                logger.info("Используются переданные df_train и df_test")
+                X_train_full = self.df_train.drop(columns=[self.target_variable], errors='ignore')
+                X_test_full = self.df_test.drop(columns=[self.target_variable], errors='ignore')
+                y_train = self.df_train[self.target_variable].copy()
+                y_test = self.df_test[self.target_variable].copy()
+
+            # 🔹 Сценарий 2: передан df → разбиваем
+            elif self.df is not None:
+                logger.info("Используется переданный df, деление на train/test")
+                df = self.df
+                if self.target_variable not in df.columns:
+                    raise ValueError(f"Целевая переменная '{self.target_variable}' не найдена")
+                X_full = df.drop(columns=[self.target_variable])
+                y_full = df[self.target_variable].copy()
+                X_train_full, X_test_full, y_train, y_test = train_test_split(
+                    X_full, y_full, test_size=0.2, random_state=42,
+                    stratify=y_full if self.task_type == "classification" else None
+                )
+
+            # 🔹 Сценарий 3: по dataset_path
+            elif self.dataset_path:
+                logger.info(f"Загрузка данных из файла: {self.dataset_path}")
+                df = pd.read_csv(self.dataset_path)
+                if self.target_variable not in df.columns:
+                    raise ValueError(f"Целевая переменная '{self.target_variable}' не найдена")
+                X_full = df.drop(columns=[self.target_variable])
+                y_full = df[self.target_variable].copy()
+                X_train_full, X_test_full, y_train, y_test = train_test_split(
+                    X_full, y_full, test_size=0.2, random_state=42,
+                    stratify=y_full if self.task_type == "classification" else None
+                )
+            else:
+                raise ValueError("Не переданы ни df, ни df_train/df_test, ни dataset_path")
+
+            if self._should_stop:
+                self.error_occurred.emit("Обучение прервано на этапе загрузки данных.")
+                return
 
             # === 🔎 ОСТАВЛЯЕМ ТОЛЬКО ЧИСЛОВЫЕ ПРИЗНАКИ ===
-            X_numeric = X.select_dtypes(include=['number'])
-            dropped_columns = X.columns.difference(X_numeric.columns).tolist()
+            X_train = X_train_full.select_dtypes(include=['number'])
+            X_test = X_test_full.select_dtypes(include=['number'])
+            dropped_columns = X_train_full.columns.difference(X_train.columns).tolist()
 
             if dropped_columns:
                 msg = f"Пропущены нечисловые признаки: {', '.join(dropped_columns)}"
@@ -58,33 +112,41 @@ class ParameterTuningWorker(QThread):
                 self.info_message.emit("Все признаки — числовые.")
                 logger.info("Нечисловые признаки не найдены.")
 
-            X = X_numeric  # ✅ Только числа
+            if self._should_stop:
+                self.error_occurred.emit("Обучение прервано после очистки признаков.")
+                return
 
-            # Определение типа задачи
+            # === Определение типа задачи ===
             if self.task_type == "classification":
                 is_classification = True
             elif self.task_type == "regression":
                 is_classification = False
             else:
                 is_classification = (
-                    y.dtype == 'object' or
-                    y.nunique() < 20 or
+                    y_train.dtype == 'object' or
+                    y_train.nunique() < 20 or
                     self.model_type in ["RandomForestClassifier", "GradientBoostingClassifier", "LogisticRegression"]
                 )
             task_type = "classification" if is_classification else "regression"
 
             # Кодируем y при необходимости
-            if is_classification and y.dtype == 'object':
-                y = LabelEncoder().fit_transform(y)
+            if is_classification and y_train.dtype == 'object':
+                le = LabelEncoder()
+                y_train = le.fit_transform(y_train)
+                y_test = le.transform(y_test)  # ⚠️ Используем тот же encoder
 
-            # Загрузка параметров
+            if self._should_stop:
+                self.error_occurred.emit("Обучение прервано до создания модели.")
+                return
+
+            # === Загрузка параметров ===
             params = get_random_search_params()
             grid = get_random_grid()
             hyperparams = grid.get(self.model_type)
             if not hyperparams:
                 raise ValueError(f"Нет гиперпараметров для: {self.model_type}")
 
-            # Создание модели
+            # === Создание модели ===
             model_classes = {
                 'RandomForestClassifier': RandomForestClassifier,
                 'GradientBoostingClassifier': GradientBoostingClassifier,
@@ -97,11 +159,11 @@ class ParameterTuningWorker(QThread):
                 raise ValueError(f"Неподдерживаемая модель: {self.model_type}")
             estimator = model_cls(random_state=params['random_state'])
 
-            # Метрики
+            # === Метрики ===
             if task_type == "classification":
                 scoring = params['scoring']
                 refit = params['refit']
-                n_classes = len(pd.unique(y))
+                n_classes = len(pd.unique(y_train))
                 if n_classes > 2:
                     scoring = {name: f'roc_auc_ovr' if name == 'roc_auc' else metric for name, metric in scoring.items()}
             else:
@@ -112,18 +174,12 @@ class ParameterTuningWorker(QThread):
                 })
                 refit = params['refit']
 
-            # Обучение
+            # === Обучение ===
             n_iter = params['n_iter']
             cv = params['cv']
             verbose = params['verbose']
             n_jobs = params['n_jobs']
             random_state = params['random_state']
-            test_size = params['test_size']
-
-            stratify = y if task_type == "classification" else None
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=test_size, random_state=random_state, stratify=stratify
-            )
 
             search = RandomizedSearchCV(
                 estimator=estimator,
@@ -138,12 +194,26 @@ class ParameterTuningWorker(QThread):
             )
 
             self.progress_updated.emit(0.0, 0, n_iter)
+
+            # Проверка перед обучением
+            if self._should_stop:
+                self.error_occurred.emit("Обучение прервано перед запуском RandomizedSearchCV.")
+                return
+
+            # Запуск обучения
             search.fit(X_train, y_train)
+
+            # Проверка после обучения
+            if self._should_stop:
+                self.error_occurred.emit("Обучение было прервано во время подбора параметров.")
+                return
+
             self.progress_updated.emit(100.0, n_iter, n_iter)
 
-            # Оценка
+            # === Оценка ===
             model = search.best_estimator_
             pred = model.predict(X_test)
+
             if task_type == "classification":
                 acc = accuracy_score(y_test, pred)
                 f1 = f1_score(y_test, pred, average='macro', zero_division=0)
@@ -178,10 +248,15 @@ class ParameterTuningWorker(QThread):
                 )
                 primary_metric = r2
 
+            # Отправляем результаты
             self.tuning_completed.emit(model, search.best_params_, primary_metric, metrics)
 
         except Exception as e:
-            logger.error(f"Ошибка: {e}")
-            self.error_occurred.emit(str(e))
+            if not self._should_stop:
+                logger.error(f"Ошибка: {e}")
+                self.error_occurred.emit(str(e))
+            else:
+                logger.info("Обучение было прервано пользователем — ошибка подавлена.")
         finally:
             self._is_running = False
+            # Сигналы можно отправлять, но не вызываем deleteLater() здесь — это делает GUI

@@ -5,7 +5,6 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Slot, QTimer
 from PySide6.QtGui import QFont
-import logging
 import os
 import re
 import joblib
@@ -17,17 +16,17 @@ from .waiting_dialog_stop_worker import WaitingDialog
 # ✅ Импорт справок
 from .metrics_help import METRICS_DESCRIPTIONS
 
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
-
 
 class ParameterTuningWindow(QWidget):
-    def __init__(self, parent=None, dataset_path=None, target_variable=None, chosen_model=None, task_type="classification"):
+    def __init__(self, parent=None, dataset_path=None, target_variable=None, chosen_model=None, task_type="classification", df=None, df_train=None, df_test=None):
         super().__init__(parent)
         self.dataset_path = dataset_path
         self.target_variable = target_variable
         self.chosen_model = chosen_model
         self.task_type = task_type
+        self.df = df
+        self.df_train = df_train
+        self.df_test = df_test
 
         self.best_model = None
         self.best_params = None
@@ -187,19 +186,16 @@ class ParameterTuningWindow(QWidget):
 
     def cancel_tuning(self):
         if self.worker and self.worker.isRunning():
-            logger.info("Пользователь нажал 'Прервать обучение'")
-
             self.status_label.setText("🛑 Прерывание...")
             self.status_label.setStyleSheet("color: #FF6B6B;")
             self.progress_bar.setVisible(False)
             self.cancel_button.setEnabled(False)
             self.cancel_button.setText("⛔ Прерывается...")
 
+            self.worker.stop()
+
             self.wait_dialog = WaitingDialog(self)
             self.wait_dialog.show()
-            QApplication.processEvents()
-
-            self.worker.terminate()
 
             self.check_worker_timer = QTimer()
             self.check_worker_timer.setInterval(200)
@@ -212,7 +208,9 @@ class ParameterTuningWindow(QWidget):
             self.delay_timer = QTimer()
             self.delay_timer.setSingleShot(True)
             self.delay_timer.timeout.connect(self.on_worker_fully_stopped)
-            self.delay_timer.start(24000)
+            self.delay_timer.start(100)
+        else:
+            QTimer.singleShot(100, self.check_worker_stopped)  # Продолжаем проверять
 
     @Slot()
     def on_worker_fully_stopped(self):
@@ -220,25 +218,28 @@ class ParameterTuningWindow(QWidget):
             self.wait_dialog.accept()
 
         if self.worker:
-            self.worker.deleteLater()
+            self.worker.deleteLater()  # ✅ Безопасно: поток уже не работает
             self.worker = None
 
         self.status_label.setText("🛑 Обучение прервано")
         self.cancel_button.setVisible(False)
 
-        QMessageBox.information(self, "Прервано", "Обучение было прервано пользователем.")
-
     def start_tuning(self):
         if self.worker and self.worker.isRunning():
-            logger.warning("Подбор уже запущен — пропуск")
             return
 
         self.worker = ParameterTuningWorker(
             dataset_path=self.dataset_path,
             target_variable=self.target_variable,
             model_type=self.chosen_model,
-            task_type=self.task_type
+            task_type=self.task_type,
+            df=self.df,
+            df_train=self.df_train,
+            df_test=self.df_test
         )
+
+        # ✅ Критически важно: при завершении — сам удалится
+        self.worker.finished.connect(self.worker.deleteLater)
 
         self.worker.tuning_completed.connect(self.on_tuning_completed)
         self.worker.error_occurred.connect(self.on_error_occurred)
@@ -283,7 +284,6 @@ class ParameterTuningWindow(QWidget):
         self.primary_metric = primary_metric_value
         self.primary_metric_name = refit_key
 
-        # === ОБНОВЛЕНИЕ МЕТРИК ===
         self.status_label.setText("✅ Обучение завершено!")
         self.status_label.setStyleSheet("color: green;")
         self.progress_bar.setVisible(False)
@@ -293,7 +293,6 @@ class ParameterTuningWindow(QWidget):
         self.params_container.setVisible(True)
         self.cancel_button.setVisible(False)
 
-        # Очистка предыдущих метрик
         while self.metrics_layout.count():
             item = self.metrics_layout.takeAt(0)
             widget = item.widget()
@@ -308,7 +307,6 @@ class ParameterTuningWindow(QWidget):
                         if w:
                             w.setParent(None)
 
-        # Парсим строки метрик
         lines = metrics_str.strip().split('\n')
         for line in lines:
             if ":" not in line:
@@ -317,7 +315,6 @@ class ParameterTuningWindow(QWidget):
             key_part = key_part.strip()
             value = value.strip()
 
-            # Поиск ключа метрики
             metric_key = self._find_matching_metric_key(key_part.lower())
             if metric_key and metric_key in METRICS_DESCRIPTIONS:
                 desc = METRICS_DESCRIPTIONS[metric_key]
@@ -328,52 +325,41 @@ class ParameterTuningWindow(QWidget):
                 label_text = f"{key_part}: {value}"
                 show_help = False
 
-            # Горизонтальный layout для строки
             row_layout = QHBoxLayout()
             row_layout.setSpacing(8)
             row_layout.setContentsMargins(0, 2, 0, 2)
 
-            # Метка метрики
             label = QLabel(label_text)
             label.setTextFormat(Qt.RichText)
             row_layout.addWidget(label)
 
-            # Кнопка помощи
             if show_help:
                 help_btn = QToolButton()
                 help_btn.setText("?")
                 help_btn.setFixedSize(20, 20)
                 help_btn.setStyleSheet("QToolButton { font: bold; border-radius: 10px; background: #e0e0e0; }")
-                help_btn.setToolTip(tooltip)
-                # ✅ Сохраняем desc в замыкании
                 help_btn.clicked.connect(lambda checked=False, d=desc: self.show_metric_help(d))
                 row_layout.addWidget(help_btn)
             else:
-                # Пустое пространство для выравнивания
                 row_layout.addSpacing(20)
 
             row_layout.addStretch()
             self.metrics_layout.addLayout(row_layout)
 
-        # Лучшие параметры
         self.params_layout.addWidget(QLabel(f"<b>Модель:</b> {self.chosen_model}"))
         for key, value in best_params.items():
             self.params_layout.addWidget(QLabel(f"<b>{key}:</b> {self.format_param_value(value)}"))
 
         self.save_button.setVisible(True)
 
-        if self.worker:
-            self.worker.deleteLater()
-            self.worker = None
+        # ❌ Убрано: self.worker.deleteLater()
+        # Удаление сделано через: self.worker.finished.connect(self.worker.deleteLater)
 
     def _find_matching_metric_key(self, text: str) -> str:
-        """Находит ключ метрики по названию"""
         text = text.lower().strip()
-        # Прямо сопоставляем
         for key, desc in METRICS_DESCRIPTIONS.items():
             if key in text:
                 return key
-        # По алиасам
         mapping = {
             'accuracy': ['accuracy', 'точность'],
             'f1_macro': ['f1', 'f1 score', 'ф1', 'ф1-мера'],
@@ -391,7 +377,6 @@ class ParameterTuningWindow(QWidget):
         return None
 
     def show_metric_help(self, desc: dict):
-        """Показывает справку по метрике"""
         QMessageBox.information(self, desc["title"], desc["text"])
 
     @Slot(str)
@@ -400,10 +385,8 @@ class ParameterTuningWindow(QWidget):
         self.status_label.setStyleSheet("color: red;")
         self.progress_bar.setVisible(False)
 
-        if self.worker:
-            self.worker.deleteLater()
-            self.worker = None
-
+        # ❌ Убрано: self.worker.deleteLater()
+        # Удаление — только через finished.connect
         QMessageBox.critical(self, "Ошибка", f"Подбор параметров прерван:\n{error_msg}")
 
     def save_best_model(self):
@@ -425,7 +408,12 @@ class ParameterTuningWindow(QWidget):
 
     def closeEvent(self, event):
         if self.worker and self.worker.isRunning():
-            QMessageBox.warning(self, "Подождите", "Обучение ещё идёт. Нельзя закрыть окно до завершения.")
+            QMessageBox.warning(
+                self,
+                "Подождите",
+                "Обучение ещё идёт. Нельзя закрыть окно до завершения.\n"
+                "Нажмите 'Прервать обучение', чтобы остановить."
+            )
             event.ignore()
         else:
             event.accept()

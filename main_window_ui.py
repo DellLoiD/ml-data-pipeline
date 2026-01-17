@@ -1,6 +1,6 @@
 # main_window_ui.py
 import sys
-import logging  # ✅ Импортируем logging в начале
+import logging  
 
 # === НАСТРОЙКА ЛОГИРОВАНИЯ — ДО ВСЕХ ИМПОРТОВ МОДУЛЕЙ ===
 logging.basicConfig(
@@ -11,6 +11,7 @@ logging.basicConfig(
         logging.StreamHandler()  # Показывает логи в терминале
     ]
 )
+
 # ==============================================
 from PySide6.QtWidgets import (QApplication, QWidget, QPushButton, QVBoxLayout, QGroupBox)
 

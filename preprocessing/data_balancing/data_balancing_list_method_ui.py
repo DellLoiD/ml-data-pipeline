@@ -290,33 +290,56 @@ class BalancingMethodsWindow(QDialog):
             QMessageBox.warning(self, "Предупреждение", "Сначала выполните балансировку.")
             return
 
-        try:
-            resampled_df = pd.DataFrame(data=self.X_resampled, columns=self.feature_cols)
-            resampled_df[self.target_col] = self.y_resampled
+        if self.X_test is None or self.y_test is None:
+            QMessageBox.critical(self, "Ошибка", "Тестовые данные не загружены. Перезагрузите датасет.")
+            return
 
-            # Используем имя из метаданных
-            base_name = "balanced_dataset"
+        try:
+            # --- 1. Подготовка имён файлов ---
+            base_name = "dataset"
             if self._last_loaded_path:
                 base_name = os.path.splitext(os.path.basename(self._last_loaded_path))[0]
-                base_name = base_name.split("_v")[0]  # Убираем версию
+                base_name = base_name.split("_v")[0]  # Убираем версию, если была
 
-            save_path = os.path.join("dataset", f"{base_name}_v{self.meta_tracker.version}.csv")
+            version = self.meta_tracker.version
+            train_path = os.path.join("dataset", f"{base_name}_train_v{version}.csv")
+            test_path = os.path.join("dataset", f"{base_name}_test_v{version}.csv")
 
-            # Сохраняем через MetaTracker
-            success = self.meta_tracker.save_to_file(save_path, resampled_df)
-            if success:
-                self._last_loaded_path = save_path
-                self.meta_tracker.version += 1  # Увеличиваем для следующего раза
-                QMessageBox.information(
-                    self, "Сохранено",
-                    f"✅ Датасет сохранён:\n{os.path.basename(save_path)}\n\n"
-                    f"Версия: v{self.meta_tracker.version - 1}"
-                )
-            else:
-                QMessageBox.critical(self, "Ошибка", "Не удалось сохранить файл.")
+            # --- 2. Создаём train (отбалансированный) ---
+            train_df = pd.DataFrame(self.X_resampled, columns=self.feature_cols)
+            train_df[self.target_col] = self.y_resampled
+
+            # --- 3. Создаём test (оригинальный) ---
+            test_df = pd.DataFrame(self.X_test, columns=self.feature_cols)
+            test_df[self.target_col] = self.y_test
+
+            # --- 4. Сохраняем train ---
+            train_success = self.meta_tracker.save_to_file(train_path, train_df)
+            if not train_success:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить обучающую выборку:\n{train_path}")
+                return
+
+            # --- 5. Сохраняем test ---
+            # Для test не меняем версию — meta_tracker не должен её менять дважды
+            test_success = self.meta_tracker.save_to_file(test_path, test_df, preserve_version=True)
+            if not test_success:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить тестовую выборку:\n{test_path}")
+                return
+
+            # --- 6. Уведомляем пользователя ---
+            self._last_loaded_path = train_path  # Для будущих действий — train как основной
+            self.meta_tracker.version += 1  # Увеличиваем только один раз
+
+            message = (
+                f"✅ Успешно сохранено:\n"
+                f"• Обучающая выборка (train): {os.path.basename(train_path)}\n"
+                f"• Тестовая выборка (test): {os.path.basename(test_path)}\n\n"
+                f"Версия: v{version}"
+            )
+            QMessageBox.information(self, "Сохранение завершено", message)
 
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Произошла ошибка при сохранении файла: {e}")
+            QMessageBox.critical(self, "Ошибка", f"Произошла ошибка при сохранении:\n{e}")
 
 
 if __name__ == "__main__":

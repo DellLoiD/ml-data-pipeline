@@ -144,18 +144,23 @@ class MetaTracker:
 
         return meta_lines
 
-    def save_to_file(self, filepath: str, data_df) -> bool:
-        """Сохраняет файл с # META: строками и данными"""
+    def save_to_file(self, file_path, df, preserve_version=False):
         try:
-            with open(filepath, "w", encoding="utf-8") as f:
-                meta_lines = self.get_meta_lines()
-                for line in meta_lines:
-                    f.write(line + "\n")
-                data_df.to_csv(f, index=False)
+            # Добавляем мета-информацию в начало
+            with open(file_path, 'w', encoding='utf-8') as f:
+                for line in self.get_meta_lines():
+                    f.write(line + '\n')
+
+            # Добавляем данные
+            df.to_csv(file_path, mode='a', index=False, encoding='utf-8')
+
+            if not preserve_version:
+                self.version += 1
             return True
         except Exception as e:
-            print(f"[MetaTracker] Ошибка сохранения: {e}")
+            print(f"Ошибка при сохранении: {e}")
             return False
+
 
     def __str__(self):
         return "\n".join(self.get_meta_lines())
