@@ -196,15 +196,20 @@ class DataModelHandler:
     def calculate_feature_importances(self, selected_models):
         splash_screen = LoadingScreen()
         splash_screen.show()
+        
         if self.X_train is None:
             splash_screen.close()
             QMessageBox.critical(self.parent, "Ошибка", "Сначала загрузите данные.")
             return
+
         X_train_scaled = StandardScaler().fit_transform(self.X_train)
         feature_names = self.X_train.columns.tolist()
+
         for model_name in selected_models:
             try:
                 params = self.labels_and_lines.get(model_name, {})
+                clf = None
+
                 if 'Random Forest Classification' in model_name:
                     n_estimators = int(params['Количество деревьев'].text())
                     clf = RandomForestClassifier(n_estimators=n_estimators, random_state=42)
@@ -221,16 +226,38 @@ class DataModelHandler:
                     clf = GradientBoostingRegressor(n_estimators=n_estimators, random_state=42)
                 else:
                     continue
+
+                # Обучаем модель
                 clf.fit(X_train_scaled, self.y_train)
-                importances = getattr(clf, 'feature_importances_', np.abs(clf.coef_.ravel()))
-                df_imp = pd.DataFrame({'Feature': feature_names, 'Importance': importances}).sort_values('Importance', ascending=False)
+
+                # 🔹 Правильное получение важности признаков
+                if hasattr(clf, 'feature_importances_'):
+                    importances = clf.feature_importances_
+                elif hasattr(clf, 'coef_'):
+                    importances = np.abs(clf.coef_).ravel()
+                    # Для многоклассовой логистической регрессии — усредняем по классам
+                    if len(clf.coef_.shape) > 1:
+                        importances = np.mean(np.abs(clf.coef_), axis=0)
+                else:
+                    raise AttributeError(f"Модель {model_name} не имеет ни feature_importances_, ни coef_")
+
+                # Создаём DataFrame и строим график
+                df_imp = pd.DataFrame({'Feature': feature_names, 'Importance': importances})
+                df_imp = df_imp.sort_values('Importance', ascending=False)
+
                 plt.figure(figsize=(10, 8))
                 sns.barplot(x='Importance', y='Feature', data=df_imp)
                 plt.title(f"Важность признаков — {model_name}")
                 plt.tight_layout()
+
+                # Сохраняем и показываем
                 os.makedirs("plots", exist_ok=True)
                 plt.savefig(f"plots/{model_name.replace(' ', '_')}_feature_importance.png")
                 plt.show()
+
             except Exception as e:
                 QMessageBox.critical(self.parent, "Ошибка", f"Ошибка при построении графика {model_name}:\n{e}")
+                continue
+
         splash_screen.close()
+
