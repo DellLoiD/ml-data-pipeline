@@ -3,7 +3,7 @@ import sys
 import pandas as pd
 import os
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QApplication,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QApplication, QInputDialog,
     QComboBox, QCheckBox, QFileDialog, QMessageBox, QGroupBox, QButtonGroup, QRadioButton
 )
 from PySide6.QtGui import QFont
@@ -259,39 +259,70 @@ class ClassificationApp(QWidget):
             df_train = pd.read_csv(train_path, comment='#')
             df_test = pd.read_csv(test_path, comment='#')
 
-            # Проверка совпадения версий
+            # Проверка версий
             if not check_train_test_versions(train_path, test_path, self):
                 return
 
-            # Проверка колонок
-            features_train = df_train.drop(columns=[c for c in df_train.columns if c in df_test.columns and not df_test[c].equals(df_train[c])], errors='ignore').columns.tolist()
-            features_test = df_test.drop(columns=[c for c in df_test.columns if c in df_train.columns and not df_train[c].equals(df_test[c])], errors='ignore').columns.tolist()
-            if set(features_train) != set(features_test):
-                QMessageBox.critical(self, "Ошибка", "Признаки в train и test не совпадают!")
+            # Найти общие колонки
+            common_cols = set(df_train.columns) & set(df_test.columns)
+            if not common_cols:
+                QMessageBox.critical(self, "Ошибка", "Нет общих колонок между train и test!")
                 return
 
-            target_col = None
-            for col in df_train.columns:
-                if col in df_test.columns and df_train[col].dtype == df_test[col].dtype:
-                    # Предположим, что target — последняя колонка или наиболее редкая
-                    target_col = col
-                    break
-            if not target_col:
-                QMessageBox.critical(self, "Ошибка", "Не удалось определить целевую переменную.")
+            # Предположим: целевая переменная — та, что есть в обоих, но не во всех признаках
+            # Уберём колонки, которые точно не целевые
+            possible_targets = [col for col in common_cols
+                               if col not in ['index', 'id', 'Id', 'ID', 'Index'] and
+                               df_train[col].nunique() < len(df_train) * 0.9]  # Не уникальная
+
+            if not possible_targets:
+                possible_targets = list(common_cols)
+
+            # Показываем диалог выбора
+            target, ok = QInputDialog.getItem(
+                self,
+                "Целевая переменная",
+                "Выберите целевую переменную (должна быть в train и test):",
+                sorted(possible_targets),
+                0,
+                False
+            )
+            if not ok or not target:
+                QMessageBox.warning(self, "Отмена", "Целевая переменная не выбрана.")
                 return
 
-            self.X_train = df_train.drop(columns=[target_col])
-            self.X_test = df_test.drop(columns=[target_col])
-            self.y_train = df_train[target_col]
-            self.y_test = df_test[target_col]
-            self.target_col = target_col
+            if target not in df_train.columns or target not in df_test.columns:
+                QMessageBox.critical(self, "Ошибка", f"Колонка '{target}' отсутствует в одном из файлов.")
+                return
+
+            # Извлекаем X, y
+            X_train = df_train.drop(columns=[target])
+            X_test = df_test.drop(columns=[target])
+            y_train = df_train[target]
+            y_test = df_test[target]
+
+            # Обновляем интерфейс
+            self.X_train = X_train
+            self.X_test = X_test
+            self.y_train = y_train
+            self.y_test = y_test
+            self.target_col = target
             self.df = None  # Не используется
-            self.data_handler.set_split_data(self.X_train, self.X_test, self.y_train, self.y_test, target_col)
+
+            # Обновляем комбобокс
+            self.target_var_combobox.clear()
+            self.target_var_combobox.addItem(target)
+            self.target_var_combobox.setCurrentText(target)
+            self.target_var_combobox.setEnabled(False)  # Блокируем, т.к. выбрано
+
+            # Передаём данные в обработчик
+            self.data_handler.set_split_data(X_train, X_test, y_train, y_test, target)
 
             self.select_dataset_btn.setText(f"📁 train: {os.path.basename(train_path)}\n   test: {os.path.basename(test_path)}")
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить файлы:\n{e}")
+
 
     def on_evaluate_models_clicked(self):
         if self.df is None and (self.X_train is None or self.y_train is None):
