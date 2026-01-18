@@ -241,9 +241,23 @@ class ClassificationApp(QWidget):
             self.dataset_file_name = os.path.basename(file_path)
             self.select_dataset_btn.setText(f"📁 {self.dataset_file_name}")
             self.data_handler.update_dataframe(df)
-            self.X_train = self.X_test = self.y_train = self.y_test = None  # Будет разделено позже
+            self.X_train = self.X_test = self.y_train = self.y_test = None
+
+            # ✅ Разблокируем поля Test Size и Random State
+            self.disable_test_size_fields(disable=False)
+
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить файл:\n{e}")
+
+            
+    def disable_test_size_fields(self, disable=True):
+        """Блокировка полей Test Size и Random State для всех моделей"""
+        for model_name, lines in self.labels_and_lines.items():
+            if 'Test Size' in lines:
+                lines['Test Size'].setEnabled(not disable)
+            if 'Random State' in lines:
+                lines['Random State'].setEnabled(not disable)
+
 
     def load_separate_datasets(self):
         # Загрузка train
@@ -270,15 +284,13 @@ class ClassificationApp(QWidget):
                 return
 
             # Предположим: целевая переменная — та, что есть в обоих, но не во всех признаках
-            # Уберём колонки, которые точно не целевые
             possible_targets = [col for col in common_cols
                                if col not in ['index', 'id', 'Id', 'ID', 'Index'] and
-                               df_train[col].nunique() < len(df_train) * 0.9]  # Не уникальная
+                               df_train[col].nunique() < len(df_train) * 0.9]
 
             if not possible_targets:
                 possible_targets = list(common_cols)
 
-            # Показываем диалог выбора
             target, ok = QInputDialog.getItem(
                 self,
                 "Целевая переменная",
@@ -295,34 +307,32 @@ class ClassificationApp(QWidget):
                 QMessageBox.critical(self, "Ошибка", f"Колонка '{target}' отсутствует в одном из файлов.")
                 return
 
-            # Извлекаем X, y
             X_train = df_train.drop(columns=[target])
             X_test = df_test.drop(columns=[target])
             y_train = df_train[target]
             y_test = df_test[target]
 
-            # Обновляем интерфейс
             self.X_train = X_train
             self.X_test = X_test
             self.y_train = y_train
             self.y_test = y_test
             self.target_col = target
-            self.df = None  # Не используется
+            self.df = None
 
-            # Обновляем комбобокс
             self.target_var_combobox.clear()
             self.target_var_combobox.addItem(target)
             self.target_var_combobox.setCurrentText(target)
-            self.target_var_combobox.setEnabled(False)  # Блокируем, т.к. выбрано
+            self.target_var_combobox.setEnabled(False)
 
-            # Передаём данные в обработчик
             self.data_handler.set_split_data(X_train, X_test, y_train, y_test, target)
 
             self.select_dataset_btn.setText(f"📁 train: {os.path.basename(train_path)}\n   test: {os.path.basename(test_path)}")
 
+            # ✅ Блокируем поля Test Size и Random State
+            self.disable_test_size_fields(disable=True)
+
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить файлы:\n{e}")
-
 
     def on_evaluate_models_clicked(self):
         if self.df is None and (self.X_train is None or self.y_train is None):
