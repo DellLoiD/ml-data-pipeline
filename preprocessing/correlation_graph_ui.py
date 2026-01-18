@@ -4,16 +4,12 @@ import os
 import seaborn as sns
 import matplotlib.pyplot as plt
 from PySide6.QtWidgets import (
-    QApplication,
-    QWidget,
-    QPushButton,
-    QFileDialog,
-    QLabel,
-    QComboBox,
-    QVBoxLayout,
-    QHBoxLayout,
-    QMessageBox
+    QApplication, QWidget, QPushButton, QFileDialog, QLabel,
+    QComboBox, QVBoxLayout, QHBoxLayout, QMessageBox, QSplitter,
+    QTextEdit
 )
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
 from utils.meta_tracker import MetaTracker  # Импорт трекера
 
 
@@ -25,7 +21,7 @@ class CorrelationGraphUI(QWidget):
         self.file_name = None
         self.removed_column = None
         self._last_loaded_path = None
-        self.meta_tracker = MetaTracker(max_line_length=150)  # Управление историей
+        self.meta_tracker = MetaTracker(max_line_length=150)
         self.initUI()
 
     def initUI(self):
@@ -35,16 +31,11 @@ class CorrelationGraphUI(QWidget):
         btn_build_correlation_graph = QPushButton('Построить график корреляции')
         btn_remove_target_variable = QPushButton('Удалить признак')
         self.btn_save_processed_data = QPushButton('Сохранить датасет')
-        self.btn_save_processed_data.setEnabled(False)  # Кнопка активируется после изменений
+        self.btn_save_processed_data.setEnabled(False)
 
         self.label_dataset_status = QLabel('')
         self.combo_box_columns = QComboBox()
         self.class_distribution_label = QLabel('')
-        self.info_label = QLabel('''
-Коэффициент корреляции близок к нулю: признак практически не зависит от другого параметра.<br/>
-Высокий коэффициент (+0.8 и выше): два признака сильно взаимосвязаны, возможно, один из них избыточен.<br/>
-Отрицательные коэффициенты (-0.8 и ниже): признаки движутся противоположно друг другу.
-''')
 
         # Обработчики кнопок
         btn_select_dataset.clicked.connect(self.selectDataset)
@@ -53,22 +44,23 @@ class CorrelationGraphUI(QWidget):
         btn_remove_target_variable.clicked.connect(self.removeTargetVariable)
         self.btn_save_processed_data.clicked.connect(self.saveProcessedData)
 
-        # Макеты
+        # Макет кнопок
         h_layout_buttons = QHBoxLayout()
         h_layout_buttons.addWidget(btn_select_dataset)
         h_layout_buttons.addWidget(btn_select_target_variable)
         h_layout_buttons.addWidget(btn_build_correlation_graph)
         h_layout_buttons.addWidget(btn_remove_target_variable)
 
+        # Основной макет
         v_layout_main = QVBoxLayout()
         v_layout_main.addLayout(h_layout_buttons)
         v_layout_main.addWidget(self.label_dataset_status)
         v_layout_main.addWidget(self.combo_box_columns)
         v_layout_main.addWidget(self.class_distribution_label)
-        v_layout_main.addWidget(self.info_label)
         v_layout_main.addWidget(self.btn_save_processed_data)
 
         self.setLayout(v_layout_main)
+        self.resize(900, 700)
 
     def selectDataset(self):
         current_file_path = os.path.abspath(__file__)
@@ -84,10 +76,8 @@ class CorrelationGraphUI(QWidget):
 
         if file_name:
             try:
-                # Загружаем мета-информацию
                 self.meta_tracker.load_from_file(file_name)
 
-                # Загружаем данные
                 if file_name.endswith('.csv'):
                     self.df = pd.read_csv(file_name, comment='#', skipinitialspace=True)
                 else:
@@ -99,7 +89,6 @@ class CorrelationGraphUI(QWidget):
                 self.combo_box_columns.clear()
                 self.combo_box_columns.addItems(list(self.df.columns))
 
-                # Добавляем в историю
                 self.meta_tracker.add_change("загружен датасет для анализа корреляции")
             except Exception as e:
                 self.label_dataset_status.setText('Ошибка загрузки файла.')
@@ -132,16 +121,26 @@ class CorrelationGraphUI(QWidget):
             self.combo_box_columns.addItems(list(self.df.columns))
             self.class_distribution_label.clear()
             self.label_dataset_status.setText(f"Признак '{removed_col}' удалён.")
-
-            # Добавляем в историю
             self.meta_tracker.add_change(f"удалён признак '{removed_col}'")
-
-            # Активируем кнопку сохранения
             self.btn_save_processed_data.setEnabled(True)
-
             self.removed_column = removed_col
         else:
             self.label_dataset_status.setText("Ничего не выбрано для удаления.")
+
+    def load_param_descriptions(self, file_path):
+        """Загружает описания параметров из .txt файла"""
+        descriptions = {}
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or ':' not in line:
+                        continue
+                    key, desc = line.split(':', 1)
+                    descriptions[key.strip()] = desc.strip()
+        except Exception as e:
+            QMessageBox.warning(self, "Ошибка", f"Не удалось прочитать файл описаний:\n{e}")
+        return descriptions
 
     def buildCorrelationGraph(self):
         if not hasattr(self, 'df'):
@@ -153,23 +152,84 @@ class CorrelationGraphUI(QWidget):
             QMessageBox.warning(self, "Внимание", "Нет числовых столбцов для построения корреляции.")
             return
 
-        all_cols = set(self.df.columns)
-        num_cols = set(numeric_df.columns)
-        cat_cols = all_cols - num_cols
+        # Выбор файла описаний
+        desc_file, _ = QFileDialog.getOpenFileName(
+            self, "Выберите файл с описаниями параметров", "./", "Text Files (*.txt)"
+        )
+        descriptions = self.load_param_descriptions(desc_file) if desc_file else None
 
-        if cat_cols:
-            ignored_list = ', '.join(sorted(cat_cols))
-            QMessageBox.information(
-                self, "Информация",
-                f"Корреляция строится только по числовым столбцам.\n"
-                f"Игнорируются: {ignored_list}"
-            )
+        num_cols = numeric_df.columns.tolist()
 
-        plt.figure(figsize=(12, 9))
-        sns.heatmap(numeric_df.corr(), annot=True, cmap='coolwarm', fmt=".2f", square=True)
-        plt.title('Матрица корреляций', fontsize=16)
+        # Создаём новое окно
+        graph_window = QWidget()
+        graph_window.setWindowTitle("Матрица корреляций с описанием параметров")
+        graph_window.resize(1100, 700)
+
+        # Разделитель
+        splitter = QSplitter(Qt.Horizontal)
+
+        # Создаём график
+        fig, ax = plt.subplots(figsize=(8, 8))
+        sns.heatmap(numeric_df.corr(), annot=True, cmap='coolwarm', fmt=".2f", square=True, ax=ax)
+        ax.set_title('Матрица корреляций', fontsize=16)
         plt.tight_layout()
-        plt.show()
+
+        from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+        canvas = FigureCanvasQTAgg(fig)
+
+        # Правая панель — описание
+        desc_widget = QWidget()
+        desc_layout = QVBoxLayout()
+        desc_label_title = QLabel("<b>Описание параметров:</b>")
+        desc_label_title.setFont(QFont("Arial", 12, QFont.Bold))
+        desc_layout.addWidget(desc_label_title)
+
+        if descriptions:
+            for col in num_cols:
+                if col in descriptions:
+                    label = QLabel(f"<b>{col}:</b> {descriptions[col]}")
+                    label.setWordWrap(True)
+                    label.setTextFormat(Qt.RichText)
+                    desc_layout.addWidget(label)
+                else:
+                    label = QLabel(f"{col}: — описание отсутствует")
+                    label.setStyleSheet("color: gray;")
+                    desc_layout.addWidget(label)
+        else:
+            no_desc = QLabel("Описание не добавлено")
+            no_desc.setStyleSheet("color: red; font-style: italic;")
+            desc_layout.addWidget(no_desc)
+
+        # Подсказка по интерпретации
+        info_label = QLabel('''
+            <b>Интерпретация корреляции:</b><br><br>
+            • <b>Близко к 0</b>: признаки практически не связаны.<br>
+            • <b>+0.8 и выше</b>: сильная прямая зависимость, возможно, один из признаков избыточен.<br>
+            • <b>-0.8 и ниже</b>: сильная обратная зависимость.
+        ''')
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("background-color: #f0f8ff; padding: 10px; border-radius: 5px;")
+        desc_layout.addWidget(info_label)
+
+        desc_layout.addStretch()
+        desc_widget.setLayout(desc_layout)
+
+        # Добавляем на splitter
+        splitter.addWidget(canvas)
+        splitter.addWidget(desc_widget)
+        splitter.setSizes([700, 400])
+
+        # Макет окна
+        main_layout = QVBoxLayout()
+        main_layout.addWidget(splitter)
+        graph_window.setLayout(main_layout)
+
+        # ✅ ВАЖНО: сохраняем ссылки, чтобы объекты не удалились
+        self.graph_window = graph_window
+        self.canvas = canvas  # ← Это предотвращает удаление
+
+        graph_window.show()
+
 
     def saveProcessedData(self):
         if not hasattr(self, 'df'):
@@ -177,7 +237,6 @@ class CorrelationGraphUI(QWidget):
             return
 
         try:
-            # Определяем базовое имя
             base_name = "correlation_processed"
             if self._last_loaded_path:
                 name = os.path.splitext(os.path.basename(self._last_loaded_path))[0]
@@ -185,7 +244,6 @@ class CorrelationGraphUI(QWidget):
 
             save_path = os.path.join("dataset", f"{base_name}_v{self.meta_tracker.version}.csv")
 
-            # Сохраняем через MetaTracker
             success = self.meta_tracker.save_to_file(save_path, self.df)
             if success:
                 self._last_loaded_path = save_path
