@@ -1,4 +1,5 @@
-# check_models_logic.py
+# check_models_logic.py — Оценка моделей (с прокруткой, кнопкой, макс. 6)
+
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, r2_score, mean_squared_error, mean_absolute_error
@@ -7,8 +8,9 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
-import os
-from PySide6.QtWidgets import QMessageBox, QLineEdit
+from PySide6.QtWidgets import (
+    QMessageBox, QVBoxLayout, QGroupBox, QLabel, QPushButton, QTextEdit, QFrame
+)
 from PySide6.QtCore import QThread, Signal
 from .check_models_loading_screen import LoadingScreen
 from datetime import datetime
@@ -55,16 +57,16 @@ class EvaluationThread(QThread):
                             auc = "Недоступно"
                     except:
                         auc = "Ошибка"
-                    line = f"Точность={acc:.4f}, Precision={prec:.4f}, Recall={rec:.4f}, F1-Score={f1:.4f}, ROC-AUC={auc}"
+                    metrics = f"Точность={acc:.4f}\nPrecision={prec:.4f}\nRecall={rec:.4f}\nF1-Score={f1:.4f}\nROC-AUC={auc}"
                 else:
                     r2 = r2_score(self.y_test, y_pred)
                     mse = mean_squared_error(self.y_test, y_pred)
                     mae = mean_absolute_error(self.y_test, y_pred)
-                    line = f"R²={r2:.4f}, MSE={mse:.4f}, MAE={mae:.4f}"
+                    metrics = f"R²={r2:.4f}\nMSE={mse:.4f}\nMAE={mae:.4f}"
 
                 elapsed = (datetime.now() - start_time).total_seconds()
                 total_time += elapsed
-                results.append((model_display_name, line))
+                results.append((model_display_name, metrics, clf))  # ← clf для графика
 
             time_text = f"Время выполнения: {total_time:.4f} секунд"
             self.finished_signal.emit(results, time_text)
@@ -73,13 +75,12 @@ class EvaluationThread(QThread):
 
 
 class DataModelHandler:
-    def __init__(self, parent, df=None, combobox=None, checkboxes=None, labels_and_lines=None, accuracy_label=None, time_label=None, task_type="classification"):
+    def __init__(self, parent, df=None, combobox=None, checkboxes=None, labels_and_lines=None, accuracy_label=None, time_label=None, task_type="classification", results_layout=None):
         self.parent = parent
         self.df = df
         self.combobox = combobox
         self.checkboxes = checkboxes
         self.labels_and_lines = labels_and_lines
-        self.accuracy_label = accuracy_label
         self.time_label = time_label
         self.task_type = task_type
         self.X_train = None
@@ -89,6 +90,7 @@ class DataModelHandler:
         self.target_col = None
         self.thread = None
         self.splash = None
+        self.results_layout = results_layout  # Для горизонтальной прокрутки
 
     def update_dataframe(self, new_df):
         self.df = new_df
@@ -98,10 +100,7 @@ class DataModelHandler:
             self.combobox.setEnabled(True)
 
     def set_split_data(self, X_train, X_test, y_train, y_test, target_col):
-        self.X_train = X_train
-        self.X_test = X_test
-        self.y_train = y_train
-        self.y_test = y_test
+        self.X_train, self.X_test, self.y_train, self.y_test = X_train, X_test, y_train, y_test
         self.target_col = target_col
         self.df = None
         if self.combobox:
@@ -120,14 +119,13 @@ class DataModelHandler:
             if not target_col:
                 QMessageBox.critical(self.parent, "Ошибка", "Не выбрана целевая переменная!")
                 return
-            # Обработка типа
             if self.task_type == "classification":
                 le = LabelEncoder()
                 self.df[target_col] = le.fit_transform(self.df[target_col])
             elif self.task_type == "regression" and not np.issubdtype(self.df[target_col].dtype, np.number):
                 QMessageBox.critical(self.parent, "Ошибка", "Регрессия требует числовой целевой переменной.")
                 return
-            X = self.df.drop(columns=[target_col]).select_dtypes(include=['number', 'Int64'])
+            X = self.df.drop(columns=[target_col]).select_dtypes(include=['number'])
             y = self.df[target_col]
             if X.empty:
                 QMessageBox.critical(self.parent, "Ошибка", "Нет числовых признаков.")
@@ -183,81 +181,74 @@ class DataModelHandler:
     def on_evaluation_finished(self, results, time_text):
         if self.splash:
             self.splash.close()
-        report_lines = [f"<b>{name}:</b><br>{metrics}" for name, metrics in results]
+
+        # ✅ Удаляем самый старый результат, если больше 5 (чтобы 6 стало максимумом)
+        while self.results_layout.count() > 5:
+            item = self.results_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        feature_names = self.X_train.columns.tolist()
+
+        for model_name, metrics, clf in results:
+            # === Блок для модели ===
+            model_group = QGroupBox(f" {model_name} ")
+            model_group.setStyleSheet("""
+                QGroupBox {
+                    font-weight: bold;
+                    border: 1px solid #aaa;
+                    border-radius: 6px;
+                    margin: 0;
+                    padding: 10px;
+                    min-width: 240px;
+                }
+            """)
+            model_layout = QVBoxLayout()
+
+            # Метрики (многострочный текст)
+            metrics_text = QTextEdit()
+            metrics_text.setPlainText(metrics)
+            metrics_text.setFixedHeight(120)
+            metrics_text.setReadOnly(True)
+            model_layout.addWidget(metrics_text)
+
+            # Кнопка "График"
+            plot_btn = QPushButton("📊 График важности")
+            plot_btn.clicked.connect(
+                lambda ch, c=clf, names=feature_names, mn=model_name:
+                self.plot_importance(c, names, mn)
+            )
+            model_layout.addWidget(plot_btn)
+
+            model_group.setLayout(model_layout)
+            self.results_layout.addWidget(model_group)
+
         self.time_label.setText(time_text)
-        if hasattr(self.parent, 'update_metrics_display'):
-            self.parent.update_metrics_display(report_lines, task_type=self.task_type)
 
     def on_evaluation_error(self, error_msg):
         if self.splash:
             self.splash.close()
         QMessageBox.critical(self.parent, "Ошибка", f"Произошла ошибка:\n{error_msg}")
 
-    def calculate_feature_importances(self, selected_models):
-        splash_screen = LoadingScreen()
-        splash_screen.show()
-        
-        if self.X_train is None:
-            splash_screen.close()
-            QMessageBox.critical(self.parent, "Ошибка", "Сначала загрузите данные.")
-            return
+    def plot_importance(self, clf, feature_names, model_name):
+        try:
+            if hasattr(clf, 'feature_importances_'):
+                importances = clf.feature_importances_
+            elif hasattr(clf, 'coef_'):
+                coef = np.abs(clf.coef_)
+                importances = coef.mean(axis=0) if coef.ndim > 1 else coef.ravel()
+            else:
+                QMessageBox.critical(self.parent, "Ошибка", f"Нет важности: {model_name}")
+                return
 
-        X_train_scaled = StandardScaler().fit_transform(self.X_train)
-        feature_names = self.X_train.columns.tolist()
+            df_imp = pd.DataFrame({'Feature': feature_names, 'Importance': importances})
+            df_imp = df_imp.sort_values('Importance', ascending=False).head(15)
 
-        for model_name in selected_models:
-            try:
-                params = self.labels_and_lines.get(model_name, {})
-                clf = None
+            plt.figure(figsize=(10, 6))
+            sns.barplot(data=df_imp, x='Importance', y='Feature')
+            plt.title(f"Важность признаков — {model_name}")
+            plt.tight_layout()
+            plt.show()
 
-                if 'Random Forest Classification' in model_name:
-                    n_estimators = int(params['Количество деревьев'].text())
-                    clf = RandomForestClassifier(n_estimators=n_estimators, random_state=42)
-                elif 'Gradient Boosting Classification' in model_name:
-                    n_estimators = int(params['Количество деревьев'].text())
-                    clf = GradientBoostingClassifier(n_estimators=n_estimators, random_state=42)
-                elif 'Logistic Regression Classification' in model_name:
-                    clf = LogisticRegression(solver='liblinear')
-                elif 'Random Forest Regression' in model_name:
-                    n_estimators = int(params['Количество деревьев'].text())
-                    clf = RandomForestRegressor(n_estimators=n_estimators, random_state=42)
-                elif 'Gradient Boosting Regression' in model_name:
-                    n_estimators = int(params['Количество деревьев'].text())
-                    clf = GradientBoostingRegressor(n_estimators=n_estimators, random_state=42)
-                else:
-                    continue
-
-                # Обучаем модель
-                clf.fit(X_train_scaled, self.y_train)
-
-                # 🔹 Правильное получение важности признаков
-                if hasattr(clf, 'feature_importances_'):
-                    importances = clf.feature_importances_
-                elif hasattr(clf, 'coef_'):
-                    importances = np.abs(clf.coef_).ravel()
-                    # Для многоклассовой логистической регрессии — усредняем по классам
-                    if len(clf.coef_.shape) > 1:
-                        importances = np.mean(np.abs(clf.coef_), axis=0)
-                else:
-                    raise AttributeError(f"Модель {model_name} не имеет ни feature_importances_, ни coef_")
-
-                # Создаём DataFrame и строим график
-                df_imp = pd.DataFrame({'Feature': feature_names, 'Importance': importances})
-                df_imp = df_imp.sort_values('Importance', ascending=False)
-
-                plt.figure(figsize=(10, 8))
-                sns.barplot(x='Importance', y='Feature', data=df_imp)
-                plt.title(f"Важность признаков — {model_name}")
-                plt.tight_layout()
-
-                # Сохраняем и показываем
-                os.makedirs("plots", exist_ok=True)
-                plt.savefig(f"plots/{model_name.replace(' ', '_')}_feature_importance.png")
-                plt.show()
-
-            except Exception as e:
-                QMessageBox.critical(self.parent, "Ошибка", f"Ошибка при построении графика {model_name}:\n{e}")
-                continue
-
-        splash_screen.close()
-
+        except Exception as e:
+            QMessageBox.critical(self.parent, "Ошибка", f"Не удалось построить график: {e}")

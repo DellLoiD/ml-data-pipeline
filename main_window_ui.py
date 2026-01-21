@@ -1,6 +1,7 @@
 # main_window_ui.py
+
 import sys
-import logging  
+import logging
 
 # === НАСТРОЙКА ЛОГИРОВАНИЯ — ДО ВСЕХ ИМПОРТОВ МОДУЛЕЙ ===
 logging.basicConfig(
@@ -8,19 +9,23 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler('parameter_tuning.log', encoding='utf-8'),
-        logging.StreamHandler()  # Показывает логи в терминале
+        logging.StreamHandler()
     ]
 )
 
-# ==============================================
-from PySide6.QtWidgets import (QApplication, QWidget, QPushButton, QVBoxLayout, QGroupBox)
+from PySide6.QtWidgets import (
+    QApplication, QWidget, QPushButton, QVBoxLayout, QGroupBox
+)
 
 # === Импорт всех модулей ===
 from preprocessing.dataset_processing_check_nan import MissingValuesDialog
 from preprocessing.dataset_processing_fix_non_numeric_ui import FixNonNumericWindow
 from preprocessing.correlation_graph_ui import CorrelationGraphUI
 from preprocessing.data_balancing.data_balancing_method_ui import DataBalancingApp
-from researching_models.check_models_ui import ClassificationApp
+from researching_models.model_evaluation_ui import ModelEvaluationUI
+from researching_models.feature_importance_ui import FeatureImportanceUI
+from researching_models.learning_curve_ui import LearningCurveUI
+from researching_models.cross_validation_ui import CrossValidationUI  # ✅ Импорт нового модуля
 from selection_of_parameters.selection_parameters_main_menu_ui import MainWindow_selection_parameters
 from inference_models.inference_trained_models import SurveyForm
 from splitting_dataset_ui import SplittingDatasetWindow
@@ -33,7 +38,10 @@ missing_values_window_instance = None
 onehot_window_instance = None
 correlation_graph_instance = None
 data_balancing_smote_instance = None
-classification_app_instance = None
+model_evaluation_instance = None
+feature_importance_instance = None
+learning_curve_instance = None
+cross_validation_instance = None  # ✅ Новая глобальная переменная
 selection_of_parameters_instance = None
 inference_trained_models_instance = None
 splitting_dataset_window_instance = None
@@ -46,7 +54,7 @@ class TrainingWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Обучение модели")
-        self.resize(380, 580)
+        self.resize(380, 620)
         self.setMinimumSize(380, 500)
 
         main_layout = QVBoxLayout()
@@ -106,15 +114,35 @@ class TrainingWindow(QWidget):
         engineering_group.setLayout(engineering_layout)
         main_layout.addWidget(engineering_group)
 
-        # === 4. Моделирование и инференс ===
+        # === 4. Оценка и выбор модели ===
+        evaluation_group = QGroupBox("📊 Оценка и выбор модели")
+        evaluation_layout = QVBoxLayout()
+
+        btn_model_evaluation = QPushButton("Оценка модели")
+        btn_model_evaluation.clicked.connect(self.open_model_evaluation)
+        evaluation_layout.addWidget(btn_model_evaluation)
+
+        btn_feature_importance = QPushButton("Важность признаков")
+        btn_feature_importance.clicked.connect(self.open_feature_importance)
+        evaluation_layout.addWidget(btn_feature_importance)
+
+        btn_learning_curve = QPushButton("Кривая обучения")
+        btn_learning_curve.clicked.connect(self.open_learning_curve)
+        evaluation_layout.addWidget(btn_learning_curve)
+
+        # ✅ НОВАЯ КНОПКА: Кросс-валидация
+        btn_cross_validation = QPushButton("Кросс-валидация")
+        btn_cross_validation.clicked.connect(self.open_cross_validation)
+        evaluation_layout.addWidget(btn_cross_validation)
+
+        evaluation_group.setLayout(evaluation_layout)
+        main_layout.addWidget(evaluation_group)
+
+        # === 5. Моделирование и инференс ===
         modeling_group = QGroupBox("🧠 Моделирование и инференс")
         modeling_layout = QVBoxLayout()
 
-        btn_model_selection = QPushButton("Оценка и выбор модели")
-        btn_model_selection.clicked.connect(self.open_classification_app)
-        modeling_layout.addWidget(btn_model_selection)
-
-        btn_hyperparameters_tuning = QPushButton("Подбор параметров для модели и обучение")
+        btn_hyperparameters_tuning = QPushButton("Подбор гиперпараметров")
         btn_hyperparameters_tuning.clicked.connect(self.openHyperParametersTuning)
         modeling_layout.addWidget(btn_hyperparameters_tuning)
 
@@ -128,6 +156,7 @@ class TrainingWindow(QWidget):
         self.setLayout(main_layout)
 
     # === Методы открытия окон ===
+
     def open_impute_by_model(self):
         global imputation_model_instance
         if not imputation_model_instance or not imputation_model_instance.isVisible():
@@ -170,11 +199,39 @@ class TrainingWindow(QWidget):
             data_balancing_smote_instance = DataBalancingApp()
             data_balancing_smote_instance.show()
 
-    def open_classification_app(self):
-        global classification_app_instance
-        if not classification_app_instance or not classification_app_instance.isVisible():
-            classification_app_instance = ClassificationApp()
-            classification_app_instance.show()
+    def open_model_evaluation(self):
+        global model_evaluation_instance
+        if not model_evaluation_instance or not model_evaluation_instance.isVisible():
+            model_evaluation_instance = ModelEvaluationUI()
+            model_evaluation_instance.show()
+
+    def open_feature_importance(self):
+        global feature_importance_instance
+        if not feature_importance_instance or not feature_importance_instance.isVisible():
+            feature_importance_instance = FeatureImportanceUI()
+            feature_importance_instance.show()
+        else:
+            feature_importance_instance.raise_()
+            feature_importance_instance.activateWindow()
+
+    def open_learning_curve(self):
+        global learning_curve_instance
+        if not learning_curve_instance or not learning_curve_instance.isVisible():
+            learning_curve_instance = LearningCurveUI()
+            learning_curve_instance.show()
+        else:
+            learning_curve_instance.raise_()
+            learning_curve_instance.activateWindow()
+
+    # ✅ НОВЫЙ МЕТОД: Открытие окна кросс-валидации
+    def open_cross_validation(self):
+        global cross_validation_instance
+        if not cross_validation_instance or not cross_validation_instance.isVisible():
+            cross_validation_instance = CrossValidationUI()
+            cross_validation_instance.show()
+        else:
+            cross_validation_instance.raise_()
+            cross_validation_instance.activateWindow()
 
     def openHyperParametersTuning(self):
         global selection_of_parameters_instance
@@ -197,10 +254,7 @@ class TrainingWindow(QWidget):
 
 # === Запуск приложения ===
 if __name__ == "__main__":
-    
     app = QApplication(sys.argv)
-
     window = TrainingWindow()
     window.show()
-
     sys.exit(app.exec())

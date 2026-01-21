@@ -256,10 +256,3 @@ class CorrelationGraphUI(QWidget):
         except Exception as e:
             self.label_dataset_status.setText('Ошибка при сохранении файла.')
             print(e)
-
-
-if __name__ == '__main__':
-    app = QApplication([])
-    window = CorrelationGraphUI()
-    window.show()
-    app.exec()

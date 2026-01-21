@@ -1,20 +1,16 @@
-# check_models_ui.py — Оценка моделей (с горизонтальной прокруткой, кнопкой, макс. 6)
-
-import sys
-import pandas as pd
-import os
+# model_evaluation_ui.py
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QApplication, QInputDialog,
-    QComboBox, QCheckBox, QFileDialog, QMessageBox, QGroupBox, QButtonGroup, QRadioButton,
-    QScrollArea, QTextEdit, QFrame
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QFileDialog, QMessageBox,
+    QCheckBox, QGroupBox, QButtonGroup, QRadioButton, QInputDialog, QScrollArea
 )
 from PySide6.QtGui import QFont
 from PySide6.QtCore import Qt
-from utils.dataset_version_checker import check_train_test_versions
-from .check_models_logic import DataModelHandler
+import os
+import pandas as pd
+from .model_evaluation_logic import ModelEvaluator
 
 
-class ClassificationApp(QWidget):
+class ModelEvaluationUI(QWidget):
     def __init__(self):
         super().__init__()
         self.dataset_file_name = ""
@@ -26,9 +22,7 @@ class ClassificationApp(QWidget):
         self.X_test = None
         self.y_train = None
         self.y_test = None
-        self.target_col = None
-        self.version = None
-        self.results_layout = None  # Для горизонтальной прокрутки
+        self.results_layout = None 
         self.init_ui()
 
     def init_ui(self):
@@ -49,6 +43,7 @@ class ClassificationApp(QWidget):
         self.task_group.addButton(self.classification_radio, 1)
         self.task_group.addButton(self.regression_radio, 2)
         self.task_group.buttonClicked.connect(self.on_task_selected)
+
         task_layout.addWidget(self.classification_radio)
         task_layout.addWidget(self.regression_radio)
         task_layout.addStretch()
@@ -59,12 +54,10 @@ class ClassificationApp(QWidget):
         self.select_dataset_btn.setEnabled(False)
         main_layout.addWidget(self.select_dataset_btn)
 
-        target_layout = QHBoxLayout()
-        target_layout.addWidget(QLabel("Целевая переменная:"))
-        self.target_var_combobox = QComboBox()
-        self.target_var_combobox.setEnabled(False)
-        target_layout.addWidget(self.target_var_combobox)
-        main_layout.addLayout(target_layout)
+        # Заменяем комбобокс на метку
+        self.target_label = QLabel("Целевая переменная: не выбрана")
+        self.target_label.setStyleSheet("font-weight: bold;")
+        main_layout.addWidget(self.target_label)
 
         models_group = QGroupBox("Модели для оценки")
         models_layout = QVBoxLayout()
@@ -87,58 +80,28 @@ class ClassificationApp(QWidget):
         self.evaluate_models_btn.setEnabled(False)
         main_layout.addWidget(self.evaluate_models_btn)
 
-        # === БЛОК РЕЗУЛЬТАТОВ — горизонтальная прокрутка ===
-        results_group = QGroupBox("📊 Результаты оценки моделей")
+        results_group = QGroupBox("Результаты оценки моделей")
         results_layout = QVBoxLayout()
 
-        help_label = QLabel(
-            "Метрики и кнопка графика.\n"
-            "Прокрутите вправо, чтобы увидеть все результаты."
-        )
-        help_label.setWordWrap(True)
-        help_label.setStyleSheet("font-size: 11px; color: #555;")
-        results_layout.addWidget(help_label)
-
-        line = QFrame()
-        line.setFrameShape(QFrame.HLine)
-        line.setFrameShadow(QFrame.Sunken)
-        results_layout.addWidget(line)
-
+        # Горизонтальный слой для нескольких результатов
         self.results_layout = QHBoxLayout()
-        self.results_layout.setSpacing(15)
-
         scroll_content = QWidget()
         scroll_content.setLayout(self.results_layout)
-
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(scroll_content)
         scroll.setFixedHeight(250)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         results_layout.addWidget(scroll)
-
-        self.time_label = QLabel('')
-        results_layout.addWidget(self.time_label)
-
-        copy_btn = QPushButton('Копировать результаты в буфер')
-        copy_btn.clicked.connect(self.on_copy_results)
-        results_layout.addWidget(copy_btn)
 
         results_group.setLayout(results_layout)
         main_layout.addWidget(results_group)
 
-        # === Инициализация DataModelHandler ===
-        self.data_handler = DataModelHandler(
+        self.evaluator = ModelEvaluator(
             parent=self,
-            df=None,
-            combobox=self.target_var_combobox,
             checkboxes=self.checkboxes,
             labels_and_lines=self.labels_and_lines,
-            accuracy_label=None,
-            time_label=self.time_label,
-            task_type="classification",
-            results_layout=self.results_layout
+            results_layout=self.results_layout,
+            task_type="classification"
         )
 
         self.create_classification_models()
@@ -149,7 +112,7 @@ class ClassificationApp(QWidget):
 
         self.setLayout(main_layout)
         self.resize(1000, 850)
-        self.setWindowTitle("Оценка моделей — Выбор задачи")
+        self.setWindowTitle("Оценка моделей")
         self.show()
 
     def on_task_selected(self):
@@ -159,24 +122,23 @@ class ClassificationApp(QWidget):
             self.selected_task = "regression"
         else:
             return
-        self.data_handler.task_type = self.selected_task
+        self.evaluator.task_type = self.selected_task
         self.classification_box.setVisible(self.selected_task == "classification")
         self.regression_box.setVisible(self.selected_task == "regression")
         for checkbox in self.checkboxes:
             checkbox.setChecked(False)
         self.select_dataset_btn.setEnabled(True)
         self.evaluate_models_btn.setEnabled(True)
-        self.update()
 
     def create_classification_models(self):
         models = {
-            'Random Forest Classification': ['Количество деревьев', 'Test Size', 'Random State'],
-            'Gradient Boosting Classification': ['Количество деревьев', 'Test Size', 'Random State'],
-            'Logistic Regression Classification': ['C', 'Max Iterations', 'Penalty']
+            'Random Forest Classification': ['Кол-во деревьев', 'Max Depth', 'Min Samples Split', 'Test Size', 'Random State'],
+            'Gradient Boosting Classification': ['Кол-во деревьев', 'Learning Rate', 'Max Depth', 'Test Size', 'Random State'],
+            'Logistic Regression Classification': ['C', 'Max Iterations', 'Penalty', 'Test Size', 'Random State']
         }
         defaults = {
-            'Количество деревьев': '100', 'Test Size': '0.2', 'Random State': '42',
-            'C': '1.0', 'Max Iterations': '100', 'Penalty': 'l2'
+            'Кол-во деревьев': '100', 'Max Depth': 'None', 'Min Samples Split': '2', 'Test Size': '0.2', 'Random State': '42',
+            'Learning Rate': '0.1', 'C': '1.0', 'Max Iterations': '100', 'Penalty': 'l2'
         }
         for model_name, params in models.items():
             hbox = QHBoxLayout()
@@ -193,16 +155,18 @@ class ClassificationApp(QWidget):
                 hbox.addWidget(le)
                 lines[param_name] = le
             self.labels_and_lines[model_name] = lines
-            hbox.addStretch()
             self.classification_layout.addLayout(hbox)
         self.classification_box.setLayout(self.classification_layout)
 
     def create_regression_models(self):
         models = {
-            'Random Forest Regression': ['Количество деревьев', 'Test Size', 'Random State'],
-            'Gradient Boosting Regression': ['Количество деревьев', 'Test Size', 'Random State']
+            'Random Forest Regression': ['Кол-во деревьев', 'Max Depth', 'Min Samples Split', 'Test Size', 'Random State'],
+            'Gradient Boosting Regression': ['Кол-во деревьев', 'Learning Rate', 'Max Depth', 'Test Size', 'Random State']
         }
-        defaults = {'Количество деревьев': '100', 'Test Size': '0.2', 'Random State': '42'}
+        defaults = {
+            'Кол-во деревьев': '100', 'Max Depth': 'None', 'Min Samples Split': '2', 'Test Size': '0.2', 'Random State': '42',
+            'Learning Rate': '0.1'
+        }
         for model_name, params in models.items():
             hbox = QHBoxLayout()
             cb = QCheckBox(model_name)
@@ -218,7 +182,6 @@ class ClassificationApp(QWidget):
                 hbox.addWidget(le)
                 lines[param_name] = le
             self.labels_and_lines[model_name] = lines
-            hbox.addStretch()
             self.regression_layout.addLayout(hbox)
         self.regression_box.setLayout(self.regression_layout)
 
@@ -236,13 +199,6 @@ class ClassificationApp(QWidget):
         else:
             self.load_single_dataset()
 
-    def disable_test_size_fields(self, disable=True):
-        for model_name, lines in self.labels_and_lines.items():
-            if 'Test Size' in lines:
-                lines['Test Size'].setEnabled(not disable)
-            if 'Random State' in lines:
-                lines['Random State'].setEnabled(not disable)
-
     def load_single_dataset(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Выберите файл CSV", "./dataset/", "CSV Files (*.csv)")
         if not file_path:
@@ -252,40 +208,42 @@ class ClassificationApp(QWidget):
             self.df = df
             self.dataset_file_name = os.path.basename(file_path)
             self.select_dataset_btn.setText(f"📁 {self.dataset_file_name}")
-            self.data_handler.update_dataframe(df)
             self.X_train = self.X_test = self.y_train = self.y_test = None
             self.disable_test_size_fields(disable=False)
+            self.select_target_variable()
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить файл:\n{e}")
 
     def load_separate_datasets(self):
         train_path, _ = QFileDialog.getOpenFileName(self, "Выберите train-файл", "./dataset/", "CSV Files (*.csv)")
-        if not train_path:
-            return
+        if not train_path: return
         test_path, _ = QFileDialog.getOpenFileName(self, "Выберите test-файл", "./dataset/", "CSV Files (*.csv)")
-        if not test_path:
-            return
+        if not test_path: return
 
         try:
             df_train = pd.read_csv(train_path, comment='#')
             df_test = pd.read_csv(test_path, comment='#')
-
-            if not check_train_test_versions(train_path, test_path, self):
-                return
 
             common_cols = set(df_train.columns) & set(df_test.columns)
             if not common_cols:
                 QMessageBox.critical(self, "Ошибка", "Нет общих колонок между train и test!")
                 return
 
-            possible_targets = [col for col in common_cols if df_train[col].nunique() < len(df_train) * 0.9]
+            possible_targets = [col for col in common_cols
+                if col not in ['index', 'id', 'Id', 'ID', 'Index'] and
+                df_train[col].nunique() < len(df_train) * 0.9]
+
             if not possible_targets:
                 possible_targets = list(common_cols)
 
             target, ok = QInputDialog.getItem(
-                self, "Целевая переменная", "Выберите:", sorted(possible_targets), 0, False
-            )
+                self, "Целевая переменная", "Выберите целевую переменную:", sorted(possible_targets), 0, False)
             if not ok or not target:
+                QMessageBox.warning(self, "Отмена", "Целевая переменная не выбрана.")
+                return
+
+            if target not in df_train.columns or target not in df_test.columns:
+                QMessageBox.critical(self, "Ошибка", f"Колонка '{target}' отсутствует в одном из файлов.")
                 return
 
             X_train = df_train.drop(columns=[target])
@@ -293,52 +251,54 @@ class ClassificationApp(QWidget):
             y_train = df_train[target]
             y_test = df_test[target]
 
+            # Сохраняем в evaluator
+            self.evaluator.set_split_data(X_train, X_test, y_train, y_test, target)
             self.X_train, self.X_test, self.y_train, self.y_test = X_train, X_test, y_train, y_test
-            self.target_col = target
-            self.df = None
+            self.df = None  # Очищаем df
 
-            self.target_var_combobox.clear()
-            self.target_var_combobox.addItem(target)
-            self.target_var_combobox.setCurrentText(target)
-            self.target_var_combobox.setEnabled(False)
-
-            self.data_handler.set_split_data(X_train, X_test, y_train, y_test, target)
-
-            train_name = os.path.basename(train_path)
-            test_name = os.path.basename(test_path)
-            self.select_dataset_btn.setText(f"📁 train: {train_name}\n   test: {test_name}")
-
+            self.target_label.setText(f"Целевая переменная: {target}")
+            self.select_dataset_btn.setText(f"📁 train: {os.path.basename(train_path)}\n   test: {os.path.basename(test_path)}")
             self.disable_test_size_fields(disable=True)
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить файлы:\n{e}")
 
+    def disable_test_size_fields(self, disable=True):
+        """Блокировка Test Size и Random State при загрузке двух датасетов"""
+        for model_name, lines in self.labels_and_lines.items():
+            if 'Test Size' in lines:
+                lines['Test Size'].setEnabled(not disable)
+            if 'Random State' in lines:
+                lines['Random State'].setEnabled(not disable)
+
+    def select_target_variable(self):
+        if self.df is None:
+            return
+        possible_targets = [col for col in self.df.columns if self.df[col].dtype != 'object']
+        if len(possible_targets) == 0:
+            possible_targets = self.df.columns.tolist()
+
+        target, ok = QInputDialog.getItem(self, "Целевая переменная", "Выберите целевую переменную:", sorted(possible_targets), 0, False)
+        if not ok or not target:
+            QMessageBox.warning(self, "Отмена", "Целевая переменная не выбрана.")
+            return
+
+        self.target_label.setText(f"Целевая переменная: {target}")
+        self.evaluator.update_dataframe(self.df, target)  # ✅ evaluator сохраняет self.target_col
+
     def on_evaluate_models_clicked(self):
+        # ✅ ОСНОВНАЯ ПОПРАВКА: ПРОВЕРЯЕМ evaluator.target_col, а не self.target_col
         if self.df is None and (self.X_train is None or self.y_train is None):
-            QMessageBox.warning(self, "Ошибка", "Сначала загрузите датасет!")
-            return
-        if self.target_var_combobox.currentText() == "" and self.target_col is None:
-            QMessageBox.warning(self, "Ошибка", "Выберите целевую переменную!")
-            return
-        self.data_handler.evaluate_models()
-
-    def on_copy_results(self):
-        text = ""
-        for i in range(self.results_layout.count()):
-            widget = self.results_layout.itemAt(i).widget()
-            if isinstance(widget, QGroupBox):
-                title = widget.title().strip().strip(" ")
-                layout = widget.layout()
-                for j in range(layout.count()):
-                    child = layout.itemAt(j).widget()
-                    if isinstance(child, QTextEdit):
-                        text += child.toPlainText() + "\n"
-        text += self.time_label.text()
-
-        if not text.strip():
-            QMessageBox.information(self, "Копирование", "Нет данных для копирования.")
+            QMessageBox.warning(self, "Предупреждение", "Сначала загрузите датасет!")
             return
 
-        clipboard = QApplication.clipboard()
-        clipboard.setText(text)
-        QMessageBox.information(self, "Копирование", "Результаты скопированы в буфер обмена!")
+        # ❌ Было: if self.target_col is None and ...
+        # ✅ Стало: проверяем evaluator.target_col
+        if self.evaluator.target_col is None:
+            QMessageBox.warning(self, "Предупреждение", "Выберите целевую переменную!")
+            return
+
+        # Передаём task_type в evaluator
+        self.evaluator.task_type = self.selected_task
+
+        self.evaluator.evaluate_models()

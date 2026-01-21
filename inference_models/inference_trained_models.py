@@ -319,8 +319,6 @@ class SurveyForm(QWidget):
             dialog.accept()
         except Exception as e:
             QMessageBox.critical(None, "Ошибка", f"Не удалось выполнить анализ:\n{str(e)}")
-            logger.error(f"Ошибка при запуске анализа: {e}")
-
 
 # === Запуск приложения ===
 if __name__ == '__main__':
