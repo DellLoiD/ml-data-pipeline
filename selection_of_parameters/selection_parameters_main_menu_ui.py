@@ -22,8 +22,8 @@ class MainWindow_selection_parameters(QWidget):
     def __init__(self):
         super().__init__()
         self.parameter_window = None
-        self.selected_dataset_path = None  # Для одного файла
-        self.train_path = None            # Для отдельных
+        self.selected_dataset_path = None  
+        self.train_path = None      
         self.test_path = None
         self.df = None
         self.df_train = None

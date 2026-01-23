@@ -32,6 +32,7 @@ from splitting_dataset_ui import SplittingDatasetWindow
 from checking_data_formats_ui import CheckingDataFormatsWindow
 from preprocessing.imputation_by_model_ui import ImputationByModelApp
 from preprocessing.hashing_methods_ui import HashingMethodsWindow
+from load_params_and_train_final_model import FinalTrainingWindow
 
 # === Глобальные ссылки на окна ===
 missing_values_window_instance = None
@@ -48,14 +49,15 @@ splitting_dataset_window_instance = None
 checking_data_formats_window_instance = None
 imputation_model_instance = None
 hashing_methods_instance = None
+final_training_instance = None
 
 
 class TrainingWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Обучение модели")
-        self.resize(380, 620)
-        self.setMinimumSize(380, 500)
+        self.resize(320, 680)
+        self.setMinimumSize(300, 680)
 
         main_layout = QVBoxLayout()
         main_layout.setSpacing(12)
@@ -130,14 +132,14 @@ class TrainingWindow(QWidget):
         btn_learning_curve.clicked.connect(self.open_learning_curve)
         evaluation_layout.addWidget(btn_learning_curve)
 
-        # ✅ НОВАЯ КНОПКА: Кросс-валидация
+        #Кросс-валидация
         btn_cross_validation = QPushButton("Кросс-валидация")
         btn_cross_validation.clicked.connect(self.open_cross_validation)
         evaluation_layout.addWidget(btn_cross_validation)
 
         evaluation_group.setLayout(evaluation_layout)
         main_layout.addWidget(evaluation_group)
-
+        
         # === 5. Моделирование и инференс ===
         modeling_group = QGroupBox("🧠 Моделирование и инференс")
         modeling_layout = QVBoxLayout()
@@ -145,6 +147,10 @@ class TrainingWindow(QWidget):
         btn_hyperparameters_tuning = QPushButton("Подбор гиперпараметров")
         btn_hyperparameters_tuning.clicked.connect(self.openHyperParametersTuning)
         modeling_layout.addWidget(btn_hyperparameters_tuning)
+        
+        btn_final_train = QPushButton("🎯 Финальное обучение модели")
+        btn_final_train.clicked.connect(self.open_final_training)
+        modeling_layout.addWidget(btn_final_train)
 
         btn_inference_models = QPushButton("Инференс модели")
         btn_inference_models.clicked.connect(self.openInferenceTrainedModels)
@@ -153,9 +159,20 @@ class TrainingWindow(QWidget):
         modeling_group.setLayout(modeling_layout)
         main_layout.addWidget(modeling_group)
 
+
         self.setLayout(main_layout)
 
     # === Методы открытия окон ===
+    def open_final_training(self):
+        """Открывает окно финального обучения модели"""
+        global final_training_instance
+        if not final_training_instance or not final_training_instance.isVisible():
+            final_training_instance = FinalTrainingWindow()
+            final_training_instance.show()
+        else:
+            final_training_instance.raise_()
+            final_training_instance.activateWindow()
+
 
     def open_impute_by_model(self):
         global imputation_model_instance
@@ -223,7 +240,6 @@ class TrainingWindow(QWidget):
             learning_curve_instance.raise_()
             learning_curve_instance.activateWindow()
 
-    # ✅ НОВЫЙ МЕТОД: Открытие окна кросс-валидации
     def open_cross_validation(self):
         global cross_validation_instance
         if not cross_validation_instance or not cross_validation_instance.isVisible():

@@ -1,20 +1,19 @@
-# selection_parameters_parameter_tuning_window.py
+# selection_parameters_parameter_tuning_window.py — Сохранение ПАРАМЕТРОВ (не модели)
+
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QApplication,
-    QPushButton, QProgressBar, QMessageBox, QToolButton
+    QPushButton, QProgressBar, QMessageBox, QToolButton, QFileDialog
 )
 from PySide6.QtCore import Qt, Slot, QTimer
 from PySide6.QtGui import QFont
 import os
 import re
-import joblib
-
+import json  
+import numpy as np
 from .selection_of_parameters_logic import get_random_grid, get_random_search_params
 from .selection_parameters_parameter_tuning_worker import ParameterTuningWorker
 from .waiting_dialog_stop_worker import WaitingDialog
-
-# ✅ Импорт справок
-from .metrics_help import METRICS_DESCRIPTIONS
+from .metrics_help import METRICS_DESCRIPTIONS  # Справки по метрикам
 
 
 class ParameterTuningWindow(QWidget):
@@ -29,7 +28,7 @@ class ParameterTuningWindow(QWidget):
         self.df_test = df_test
 
         self.best_model = None
-        self.best_params = None
+        self.best_params = None  # Будет сохранён
         self.accuracy = None
         self.metrics_text = ""
         self.primary_metric = None
@@ -131,7 +130,6 @@ class ParameterTuningWindow(QWidget):
         """)
         main_layout.addWidget(self.progress_bar)
 
-        # === КНОПКА "ПРЕРВАТЬ ОБУЧЕНИЕ" ===
         self.cancel_button = QPushButton("🛑 Прервать обучение")
         self.cancel_button.setStyleSheet("""
             font-size: 14px; 
@@ -150,7 +148,6 @@ class ParameterTuningWindow(QWidget):
         self.results_title.setVisible(False)
         main_layout.addWidget(self.results_title)
 
-        # === КОНТЕЙНЕР МЕТРИК ===
         self.metrics_container = QWidget()
         self.metrics_layout = QVBoxLayout()
         self.metrics_container.setLayout(self.metrics_layout)
@@ -170,12 +167,13 @@ class ParameterTuningWindow(QWidget):
 
         main_layout.addStretch()
 
-        self.save_button = QPushButton("💾 Сохранить лучшую модель")
-        self.save_button.clicked.connect(self.save_best_model)
+        # ✅ КНОПКА: СОХРАНЕНИЕ ПАРАМЕТРОВ, НЕ МОДЕЛИ
+        self.save_button = QPushButton("📋 Сохранить лучшие параметры")
+        self.save_button.clicked.connect(self.save_best_params)
         self.save_button.setVisible(False)
         self.save_button.setStyleSheet("""
             font-size: 14px; padding: 12px;
-            background-color: #4CAF50; color: white;
+            background-color: #2196F3; color: white;  /* Синий — отличает от "модель" */
             border: none; border-radius: 6px;
         """)
         main_layout.addWidget(self.save_button)
@@ -191,7 +189,6 @@ class ParameterTuningWindow(QWidget):
             self.progress_bar.setVisible(False)
             self.cancel_button.setEnabled(False)
             self.cancel_button.setText("⛔ Прерывается...")
-
             self.worker.stop()
 
             self.wait_dialog = WaitingDialog(self)
@@ -210,7 +207,7 @@ class ParameterTuningWindow(QWidget):
             self.delay_timer.timeout.connect(self.on_worker_fully_stopped)
             self.delay_timer.start(100)
         else:
-            QTimer.singleShot(100, self.check_worker_stopped)  # Продолжаем проверять
+            QTimer.singleShot(100, self.check_worker_stopped)
 
     @Slot()
     def on_worker_fully_stopped(self):
@@ -218,7 +215,7 @@ class ParameterTuningWindow(QWidget):
             self.wait_dialog.accept()
 
         if self.worker:
-            self.worker.deleteLater()  # ✅ Безопасно: поток уже не работает
+            self.worker.deleteLater()
             self.worker = None
 
         self.status_label.setText("🛑 Обучение прервано")
@@ -238,9 +235,7 @@ class ParameterTuningWindow(QWidget):
             df_test=self.df_test
         )
 
-        # ✅ Критически важно: при завершении — сам удалится
         self.worker.finished.connect(self.worker.deleteLater)
-
         self.worker.tuning_completed.connect(self.on_tuning_completed)
         self.worker.error_occurred.connect(self.on_error_occurred)
         self.worker.progress_updated.connect(self.on_progress_update)
@@ -248,7 +243,6 @@ class ParameterTuningWindow(QWidget):
         self.cancel_button.setVisible(True)
         self.cancel_button.setEnabled(True)
         self.cancel_button.setText("🛑 Прервать обучение")
-
         self.status_label.setVisible(True)
         self.progress_bar.setVisible(True)
         self.worker.start()
@@ -259,7 +253,7 @@ class ParameterTuningWindow(QWidget):
 
     @Slot(object, dict, float, str)
     def on_tuning_completed(self, best_model, best_params, accuracy, metrics_str):
-        self.best_model = best_model
+        self.best_model = best_model  # ✅ Ещё нужна? — только для анализа, не сохраняем
         self.best_params = best_params
         self.accuracy = accuracy
         self.metrics_text = metrics_str
@@ -280,7 +274,6 @@ class ParameterTuningWindow(QWidget):
         pattern = metric_key_map.get(refit_key, refit_key.replace('_', ' ').title())
         match = re.search(rf"{pattern}:\s*([0-9.]+)", metrics_str)
         primary_metric_value = float(match.group(1)) if match else accuracy
-
         self.primary_metric = primary_metric_value
         self.primary_metric_name = refit_key
 
@@ -293,6 +286,7 @@ class ParameterTuningWindow(QWidget):
         self.params_container.setVisible(True)
         self.cancel_button.setVisible(False)
 
+        # Очистка метрик
         while self.metrics_layout.count():
             item = self.metrics_layout.takeAt(0)
             widget = item.widget()
@@ -307,6 +301,7 @@ class ParameterTuningWindow(QWidget):
                         if w:
                             w.setParent(None)
 
+        # Отображение метрик
         lines = metrics_str.strip().split('\n')
         for line in lines:
             if ":" not in line:
@@ -346,14 +341,13 @@ class ParameterTuningWindow(QWidget):
             row_layout.addStretch()
             self.metrics_layout.addLayout(row_layout)
 
+        # Отображение параметров
         self.params_layout.addWidget(QLabel(f"<b>Модель:</b> {self.chosen_model}"))
-        for key, value in best_params.items():
-            self.params_layout.addWidget(QLabel(f"<b>{key}:</b> {self.format_param_value(value)}"))
+        for key, value in self.best_params.items():
+            value_str = self.format_param_value(value)
+            self.params_layout.addWidget(QLabel(f"<b>{key}:</b> {value_str}"))
 
         self.save_button.setVisible(True)
-
-        # ❌ Убрано: self.worker.deleteLater()
-        # Удаление сделано через: self.worker.finished.connect(self.worker.deleteLater)
 
     def _find_matching_metric_key(self, text: str) -> str:
         text = text.lower().strip()
@@ -384,27 +378,83 @@ class ParameterTuningWindow(QWidget):
         self.status_label.setText(f"❌ Ошибка: {error_msg}")
         self.status_label.setStyleSheet("color: red;")
         self.progress_bar.setVisible(False)
+        QMessageBox.critical(self, "Ошибка", f"Подбор параметров прерван:\n{str(np.e)}")
 
-        # ❌ Убрано: self.worker.deleteLater()
-        # Удаление — только через finished.connect
-        QMessageBox.critical(self, "Ошибка", f"Подбор параметров прерван:\n{error_msg}")
-
-    def save_best_model(self):
-        if not self.best_model:
-            QMessageBox.warning(self, "Предупреждение", "Нет обученной модели для сохранения!")
+    # ✅ НОВАЯ ФУНКЦИЯ: СОХРАНЕНИЕ JSON С ПАРАМЕТРАМИ
+    def save_best_params(self):
+        if not self.best_params:
+            QMessageBox.warning(self, "Предупреждение", "Нет подобранных параметров для сохранения!")
             return
+
         try:
-            models_dir = "trained_models"
-            os.makedirs(models_dir, exist_ok=True)
-            dataset_name = os.path.splitext(os.path.basename(self.dataset_path))[0]
+            # Папка для параметров
+            params_dir = "model_params"
+            os.makedirs(params_dir, exist_ok=True)
+
+            # Имя датасета
+            if self.dataset_path:
+                dataset_name = os.path.splitext(os.path.basename(self.dataset_path))[0]
+            else:
+                dataset_name = "unknown_dataset"
+
+            # Имя файла
             model_name = self.chosen_model.lower().replace(" ", "_")
-            metric_value = f"{self.primary_metric:.4f}".replace('.', '_') if self.primary_metric else "unknown"
-            filename = f"{model_name}_{dataset_name}_{self.primary_metric_name}_{metric_value}.pkl"
-            file_path = os.path.join(models_dir, filename)
-            joblib.dump(self.best_model, file_path)
-            QMessageBox.information(self, "Успех", f"Модель сохранена:\n{filename}")
+            metric_value = f"{self.primary_metric:.4f}".replace('.', '_')
+            filename = f"{model_name}_{dataset_name}_{self.primary_metric_name}_{metric_value}.json"
+            file_path = os.path.join(params_dir, filename)
+
+            # Диалог сохранения
+            save_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Сохранить параметры",
+                file_path,
+                "JSON Files (*.json)"
+            )
+            if not save_path:
+                return
+
+            # Подготовка данных
+            params_to_save = {
+                "model_type": self.chosen_model,
+                "target_variable": self.target_variable,
+                "task_type": self.task_type,
+                "best_params": self.serialize_params(self.best_params),
+                "primary_metric": {
+                    "name": self.primary_metric_name,
+                    "value": self.primary_metric
+                },
+                "generated_at": str(__import__('datetime').datetime.now()),
+                "source": "ParameterTuningWindow"
+            }
+
+            # Сохранение
+            with open(save_path, 'w', encoding='utf-8') as f:
+                json.dump(params_to_save, f, indent=4, ensure_ascii=False)
+
+            QMessageBox.information(self, "Успех", f"Параметры сохранены:\n{os.path.basename(save_path)}")
+
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить модель:\n{str(e)}")
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить параметры:\n{str(e)}")
+
+    def serialize_params(self, params):
+        """
+        Конвертирует параметры в JSON-совместимый формат.
+        """
+        result = {}
+        for k, v in params.items():
+            if hasattr(v, 'rvs'):  # Если распределение
+                result[k] = str(v)
+            elif isinstance(v, (np.integer, np.floating)):
+                result[k] = float(v)
+            elif isinstance(v, np.ndarray):
+                result[k] = v.tolist()
+            elif v is None or isinstance(v, (str, int, float, bool)):
+                result[k] = v
+            elif isinstance(v, (list, tuple)):
+                result[k] = [self.serialize_params({'item': x})['item'] for x in v]
+            else:
+                result[k] = str(v)
+        return result
 
     def closeEvent(self, event):
         if self.worker and self.worker.isRunning():
