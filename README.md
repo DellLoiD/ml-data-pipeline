@@ -29,17 +29,17 @@
    
 4. Создайте и активируйте виртуальное окружение:
 
-  python -m venv venv
+    python -m venv venv
 
-  venv\Scripts\activate
+    venv\Scripts\activate
 
 5. Установите зависимости:
 
-  pip install -r requirements.txt
+      pip install -r requirements.txt
 
 6. Запустите приложение:
 
-  python main_window_ui.py
+      python main_window_ui.py
 
 ## 🎬 Видео: как скачать проект
 
