@@ -23,21 +23,23 @@
 
    git clone https://github.com/DellLoiD/ml-data-pipeline.git
    
+3. Зайдите в папку проекта:
+   
    cd ml-data-pipeline
    
-Создайте и активируйте виртуальное окружение:
+4. Создайте и активируйте виртуальное окружение:
 
-python -m venv venv
+    python -m venv venv
 
-venv\Scripts\activate
+    venv\Scripts\activate
 
-Установите зависимости:
+5. Установите зависимости:
 
-pip install -r requirements.txt
+      pip install -r requirements.txt
 
-Запустите приложение:
+6. Запустите приложение:
 
-python main_window_ui.py
+      python main_window_ui.py
 
 ## 🎬 Видео: как скачать проект
 
