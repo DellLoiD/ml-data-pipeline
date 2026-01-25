@@ -25,7 +25,7 @@ from preprocessing.data_balancing.data_balancing_method_ui import DataBalancingA
 from researching_models.model_evaluation_ui import ModelEvaluationUI
 from researching_models.feature_importance_ui import FeatureImportanceUI
 from researching_models.learning_curve_ui import LearningCurveUI
-from researching_models.cross_validation_ui import CrossValidationUI  # ✅ Импорт нового модуля
+from researching_models.cross_validation_ui import CrossValidationUI 
 from selection_of_parameters.selection_parameters_main_menu_ui import MainWindow_selection_parameters
 from inference_models.inference_trained_models import SurveyForm
 from splitting_dataset_ui import SplittingDatasetWindow
@@ -42,7 +42,7 @@ data_balancing_smote_instance = None
 model_evaluation_instance = None
 feature_importance_instance = None
 learning_curve_instance = None
-cross_validation_instance = None  # ✅ Новая глобальная переменная
+cross_validation_instance = None
 selection_of_parameters_instance = None
 inference_trained_models_instance = None
 splitting_dataset_window_instance = None

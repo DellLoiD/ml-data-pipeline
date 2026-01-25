@@ -7,9 +7,9 @@ from PySide6.QtWidgets import (
     QMessageBox, QTextEdit, QGroupBox, QInputDialog, QListWidget,
     QDialog, QVBoxLayout as QLayout, QDialogButtonBox, QListWidgetItem
 )
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtGui import QFont
 
-# Импорт нового трекера
+# Импорт трекера
 from utils.meta_tracker import MetaTracker
 
 
@@ -59,6 +59,7 @@ class AlignColumnsApp(QWidget):
         self.target_file_name = ""
         self._last_loaded_path = None  # Для сохранения
         self.meta_tracker = MetaTracker(max_line_length=150)  # Управление историей
+        self.changes_made = False  # Флаг: были ли изменения
         self.init_ui()
 
     def init_ui(self):
@@ -106,6 +107,12 @@ class AlignColumnsApp(QWidget):
         results_group.setLayout(results_layout)
         layout.addWidget(results_group)
 
+        # === КНОПКА СОХРАНЕНИЯ (новая) ===
+        self.save_btn = QPushButton("💾 Сохранить изменения в датасет")
+        self.save_btn.clicked.connect(self.save_aligned_dataset)
+        self.save_btn.setEnabled(False)  # Активируется после изменений
+        layout.addWidget(self.save_btn)
+
         # === Настройки окна ===
         self.setLayout(layout)
         self.resize(750, 600)
@@ -131,9 +138,7 @@ class AlignColumnsApp(QWidget):
                                       f"• Строки: {len(self.reference_df)}")
 
             self.meta_tracker.add_change("загружен референсный датасет для выравнивания")
-
             self.check_ready()
-
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить референсный датасет:\n{e}")
 
@@ -158,9 +163,7 @@ class AlignColumnsApp(QWidget):
                                      f"• Строки: {len(self.target_df)}")
 
             self.meta_tracker.add_change("загружен целевой датасет для выравнивания")
-
             self.check_ready()
-
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить целевой датасет:\n{e}")
 
@@ -190,7 +193,6 @@ class AlignColumnsApp(QWidget):
 
     def align_column_types(self):
         """Выравнивание типов данных выбранных колонок"""
-        # ✅ ИСПРАВЛЕНО: проверяем, что оба датасета загружены
         if self.reference_df is None or self.target_df is None:
             QMessageBox.warning(self, "Ошибка", "Сначала загрузите оба датасета!")
             return
@@ -221,25 +223,18 @@ class AlignColumnsApp(QWidget):
                 continue
 
             try:
-                # Особые правила для числовых типов
                 if pd.api.types.is_integer_dtype(ref_dtype):
-                    # Приводим к int
                     self.target_df[col] = pd.to_numeric(self.target_df[col], errors='coerce').astype('Int64')
                 elif pd.api.types.is_float_dtype(ref_dtype):
-                    # Приводим к float
                     self.target_df[col] = pd.to_numeric(self.target_df[col], errors='coerce').astype('float64')
                 elif pd.api.types.is_bool_dtype(ref_dtype):
-                    # Приводим к bool
                     self.target_df[col] = self.target_df[col].astype(bool)
                 elif pd.api.types.is_datetime64_any_dtype(ref_dtype):
-                    # Приводим к datetime
                     self.target_df[col] = pd.to_datetime(self.target_df[col], errors='coerce')
                 else:
-                    # Приводим к строке, если не получается
                     self.target_df[col] = self.target_df[col].astype(str)
 
                 changes.append(f"• {col}: {target_dtype} → {ref_dtype}")
-
             except Exception as e:
                 errors.append(f"{col}: {str(e)}")
 
@@ -248,6 +243,7 @@ class AlignColumnsApp(QWidget):
         if changes:
             result_text += "<br>".join(changes)
             self.meta_tracker.add_change(f"выровнены типы для колонок: {', '.join(selected_cols)}")
+            self.changes_made = True
         else:
             result_text += "Ничего не изменено."
 
@@ -256,20 +252,9 @@ class AlignColumnsApp(QWidget):
 
         self.results_text.setHtml(result_text)
 
-        # Показываем сообщение об успехе и предлагаем сохранить
+        # Активируем кнопку "Сохранить"
         if changes:
-            reply = QMessageBox.question(
-                self, "Сохранить",
-                "Типы данных выровнены. Сохранить обновлённый целевой датасет?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes
-            )
-            if reply == QMessageBox.Yes:
-                self.save_aligned_dataset()
-        else:
-            QMessageBox.information(self, "Готово", "Изменений не было — сохранение не требуется.")
-
-
+            self.save_btn.setEnabled(True)
 
     def align_columns(self):
         """Выравнивает порядок колонок целевого датасета по референсному"""
@@ -312,7 +297,10 @@ class AlignColumnsApp(QWidget):
         else:
             self.target_df = self.target_df[ref_cols]
             dropped_count = 0
-            self.meta_tracker.add_change("выровнен порядок колонок по референсному датасету")
+            self.meta_tracker.add_change("выровнен порядок колонок")
+
+        self.changes_made = True
+        self.save_btn.setEnabled(True)  # Активируем кнопку сохранения
 
         result_text = f"""
         <b>✅ Выравнивание выполнено!</b><br><br>
@@ -328,21 +316,11 @@ class AlignColumnsApp(QWidget):
         result_text += "<pre>" + " → ".join(ref_cols[:5]) + ("..." if len(ref_cols) > 5 else "") + "</pre>"
 
         self.results_text.setHtml(result_text)
-        self.ask_save_aligned_dataset()
-
-    def ask_save_aligned_dataset(self):
-        """Спрашивает, сохранить ли выровненный датасет"""
-        reply = QMessageBox.question(
-            self, "Сохранить",
-            "Выравнивание завершено. Сохранить отредактированный датасет?",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if reply == QMessageBox.Yes:
-            self.save_aligned_dataset()
 
     def save_aligned_dataset(self):
         """Сохраняет выровненный датасет с использованием MetaTracker"""
-        if self.target_df is None:
+        if self.target_df is None or not self.changes_made:
+            QMessageBox.warning(self, "Нет данных", "Нет изменений для сохранения.")
             return
 
         base_name = "aligned_dataset"
@@ -356,12 +334,19 @@ class AlignColumnsApp(QWidget):
             success = self.meta_tracker.save_to_file(save_path, self.target_df)
             if success:
                 self._last_loaded_path = save_path
+                # Увеличиваем версию только после успешного сохранения
+                prev_version = self.meta_tracker.version
                 self.meta_tracker.version += 1
+
                 QMessageBox.information(
                     self, "Сохранено",
-                    f"✅ Датасет сохранён:\n{os.path.basename(save_path)}\n\n"
-                    f"Версия: v{self.meta_tracker.version - 1}"
+                    f"✅ Датасет сохранён:\n\n"
+                    f"📁 {os.path.basename(save_path)}\n\n"
+                    f"🔖 Версия: v{prev_version}"
                 )
+                # После сохранения блокируем кнопку
+                self.save_btn.setEnabled(False)
+                self.changes_made = False
             else:
                 QMessageBox.critical(self, "Ошибка", "Не удалось сохранить файл.")
         except Exception as e:
