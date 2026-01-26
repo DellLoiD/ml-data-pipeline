@@ -56,8 +56,8 @@ class TrainingWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Обучение модели")
-        self.resize(320, 680)
-        self.setMinimumSize(300, 680)
+        self.resize(320, 650)
+        self.setMinimumSize(300, 650)
 
         main_layout = QVBoxLayout()
         main_layout.setSpacing(12)
@@ -90,56 +90,55 @@ class TrainingWindow(QWidget):
         preprocessing_group.setLayout(preprocessing_layout)
         main_layout.addWidget(preprocessing_group)
 
-        # === 2. Разделение и восстановление ===
-        engineering_group = QGroupBox("⚙️ Разделение и восстановление")
-        engineering_layout = QVBoxLayout()
-
-        btn_split_dataset = QPushButton("✂️ Разделение датасета")
-        btn_split_dataset.clicked.connect(self.open_splitting_dataset)
-        engineering_layout.addWidget(btn_split_dataset)
-
-        btn_impute_model = QPushButton("🔧 Восстановить значения моделью")
-        btn_impute_model.clicked.connect(self.open_impute_by_model)
-        engineering_layout.addWidget(btn_impute_model)
-
-        engineering_group.setLayout(engineering_layout)
-        main_layout.addWidget(engineering_group)
-
-        # === 3. Анализ и визуализация ===
-        analysis_group = QGroupBox("🔍 Анализ и визуализация")
+        # === 2. Анализ и выбор модели ===
+        analysis_group = QGroupBox("🔍 Анализ и выбор модели")
         analysis_layout = QVBoxLayout()
 
-        btn_correlation_plot = QPushButton("Корреляция параметров (график)")
+        # Кнопка "Оценка и выбор модели" — теперь с иконкой
+        btn_model_evaluation = QPushButton("📊 Оценка и выбор модели")
+        btn_model_evaluation.clicked.connect(self.open_model_evaluation)
+        analysis_layout.addWidget(btn_model_evaluation)
+
+        # Корреляция
+        btn_correlation_plot = QPushButton("✨Корреляция параметров")
         btn_correlation_plot.clicked.connect(self.openCorrelationGraph)
         analysis_layout.addWidget(btn_correlation_plot)
 
-        btn_feature_importance = QPushButton("Важность признаков")
+        # Важность признаков
+        btn_feature_importance = QPushButton("🌐Важность признаков")
         btn_feature_importance.clicked.connect(self.open_feature_importance)
         analysis_layout.addWidget(btn_feature_importance)
+
+        # Кривая обучения
+        btn_learning_curve = QPushButton("🗺️Кривая обучения")
+        btn_learning_curve.clicked.connect(self.open_learning_curve)
+        analysis_layout.addWidget(btn_learning_curve)
+
+        # Кросс-валидация
+        btn_cross_validation = QPushButton("🎯Кросс-валидация")
+        btn_cross_validation.clicked.connect(self.open_cross_validation)
+        analysis_layout.addWidget(btn_cross_validation)
 
         analysis_group.setLayout(analysis_layout)
         main_layout.addWidget(analysis_group)
 
-        # === 4. Оценка и выбор модели ===
-        evaluation_group = QGroupBox("📊 Оценка и выбор модели")
-        evaluation_layout = QVBoxLayout()
+        # === 3. Восстановление пропусков с помощью модели ===
+        imputation_group = QGroupBox("⚙️ Восстановление пропусков с помощью модели")
+        imputation_layout = QVBoxLayout()
 
-        btn_model_evaluation = QPushButton("Оценка модели")
-        btn_model_evaluation.clicked.connect(self.open_model_evaluation)
-        evaluation_layout.addWidget(btn_model_evaluation)
+        btn_impute_model = QPushButton("🔧 Восстановить значения моделью")
+        btn_impute_model.clicked.connect(self.open_impute_by_model)
+        imputation_layout.addWidget(btn_impute_model)
 
-        btn_learning_curve = QPushButton("Кривая обучения")
-        btn_learning_curve.clicked.connect(self.open_learning_curve)
-        evaluation_layout.addWidget(btn_learning_curve)
+        # Опционально: кнопка разделения (если нужно оставить)
+        btn_split_dataset = QPushButton("✂️ Разделение датасета")
+        btn_split_dataset.clicked.connect(self.open_splitting_dataset)
+        imputation_layout.addWidget(btn_split_dataset)
 
-        btn_cross_validation = QPushButton("Кросс-валидация")
-        btn_cross_validation.clicked.connect(self.open_cross_validation)
-        evaluation_layout.addWidget(btn_cross_validation)
+        imputation_group.setLayout(imputation_layout)
+        main_layout.addWidget(imputation_group)
 
-        evaluation_group.setLayout(evaluation_layout)
-        main_layout.addWidget(evaluation_group)
-        
-        # === 5. Моделирование и инференс ===
+        # === 4. Моделирование и инференс ===
         modeling_group = QGroupBox("🧠 Моделирование и инференс")
         modeling_layout = QVBoxLayout()
 
@@ -159,7 +158,6 @@ class TrainingWindow(QWidget):
         main_layout.addWidget(modeling_group)
 
         self.setLayout(main_layout)
-
 
     # === Методы открытия окон ===
     def open_final_training(self):
