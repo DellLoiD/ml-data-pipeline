@@ -113,7 +113,7 @@ class FeatureImportanceCalculator:
         sns.barplot(data=df_imp, x='Importance', y='Feature')
         plt.title(f"Важность признаков — {model_name}")
         plt.tight_layout()
-        plt.show()  # ✅ Вот он — главный plt.show()
+        plt.show()
 
     def safe_int(self, params, key, default):
         try:

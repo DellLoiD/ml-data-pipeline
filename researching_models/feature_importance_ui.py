@@ -1,8 +1,9 @@
-# feature_importance_ui.py — важность признаков (только один датасет, стиль CV)
+# feature_importance_ui.py
 import os
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QMessageBox, QLineEdit, QDialog,
-    QCheckBox, QGroupBox, QButtonGroup, QRadioButton, QInputDialog, QScrollArea, QTextEdit, QFrame
+    QCheckBox, QGroupBox, QButtonGroup, QRadioButton, QInputDialog, QScrollArea, QTextEdit, QFrame,
+    QGridLayout, QSpacerItem, QSizePolicy
 )
 from PySide6.QtGui import QFont
 from PySide6.QtCore import Qt
@@ -13,6 +14,7 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import LogisticRegression
+from utils.meta_tracker import MetaTracker
 
 
 class HelpDialog(QDialog):
@@ -30,6 +32,63 @@ class HelpDialog(QDialog):
         self.setLayout(layout)
 
 
+class DeleteColumnsDialog(QDialog):
+    """Диалог для выбора колонок для удаления — сортирует по важности (от низкой к высокой)"""
+    def __init__(self, columns, importances_dict=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Удалить колонки")
+        self.resize(350, 400)
+
+        layout = QVBoxLayout()
+
+        info_label = QLabel("Выберите колонки для удаления:")
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+
+        scroll = QScrollArea()
+        scroll_content = QWidget()
+        grid = QGridLayout(scroll_content)
+        scroll.setWidget(scroll_content)
+        scroll.setWidgetResizable(True)
+        scroll.setFixedHeight(250)
+
+        self.checkboxes = []
+        sorted_columns = columns
+
+        # Если есть данные о важности — сортируем по возрастанию (сначала наименее важные)
+        if importances_dict:
+            col_importance = {col: sum(importances_dict.get(col, [0])) / len(importances_dict.get(col, [0])) for col in columns}
+            sorted_columns = sorted(columns, key=lambda col: col_importance.get(col, 0))  # от низкой к высокой
+        else:
+            sorted_columns = sorted(columns)
+
+        for idx, col in enumerate(sorted_columns):
+            cb = QCheckBox(str(col))
+            cb.setChecked(False)  # ✅ Теперь не отмечены по умолчанию
+            grid.addWidget(cb, idx, 0)
+            self.checkboxes.append(cb)
+
+        # Пустое пространство внизу
+        grid.addItem(QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding), len(sorted_columns), 0)
+
+        layout.addWidget(scroll)
+
+        button_layout = QHBoxLayout()
+        cancel_btn = QPushButton("Отмена")
+        cancel_btn.clicked.connect(self.reject)
+        delete_btn = QPushButton("Удалить")
+        delete_btn.clicked.connect(self.accept)
+        button_layout.addStretch()
+        button_layout.addWidget(cancel_btn)
+        button_layout.addWidget(delete_btn)
+        layout.addLayout(button_layout)
+
+        self.setLayout(layout)
+
+    def get_selected_columns(self):
+        return [cb.text() for cb in self.checkboxes if cb.isChecked()]
+
+
 class FeatureImportanceUI(QWidget):
     def __init__(self):
         super().__init__()
@@ -41,6 +100,9 @@ class FeatureImportanceUI(QWidget):
         self.labels_and_lines = {}
         self.task_type = "classification"
         self.results_layout = None  # Горизонтальная прокрутка результатов
+        self.original_path = None  # Путь к загруженному файлу
+        self.meta_tracker = MetaTracker()
+        self.feature_importances = {}  # Словарь: {'feature': [imp1, imp2, ...]}
         self.init_ui()
 
     def init_ui(self):
@@ -76,6 +138,21 @@ class FeatureImportanceUI(QWidget):
         self.target_label = QLabel("Целевая переменная: не выбрана")
         self.target_label.setStyleSheet("font-weight: bold;")
         main_layout.addWidget(self.target_label)
+
+        # === Кнопки удаления и сохранения ===
+        btn_layout = QHBoxLayout()
+
+        self.delete_columns_btn = QPushButton("🗑️ Удалить колонки")
+        self.delete_columns_btn.clicked.connect(self.delete_selected_columns)
+        self.delete_columns_btn.setEnabled(False)
+        btn_layout.addWidget(self.delete_columns_btn)
+
+        self.save_btn = QPushButton("💾 Сохранить датасет")
+        self.save_btn.clicked.connect(self.save_dataset)
+        self.save_btn.setEnabled(False)
+        btn_layout.addWidget(self.save_btn)
+
+        main_layout.addLayout(btn_layout)
 
         # Модели
         models_group = QGroupBox("Модели для анализа")
@@ -146,7 +223,7 @@ class FeatureImportanceUI(QWidget):
         self.task_type = "classification" if self.classification_radio.isChecked() else "regression"
         self.classification_box.setVisible(self.task_type == "classification")
         self.regression_box.setVisible(self.task_type == "regression")
-        
+
     def create_models(self):
         clf_models = {
             'Random Forest Classification': ['Кол-во деревьев', 'Max Depth', 'Min Samples Split', 'Random State'],
@@ -166,7 +243,6 @@ class FeatureImportanceUI(QWidget):
             self._add_model_to_layout(model_name, params, defaults, self.classification_layout)
         for model_name, params in reg_models.items():
             self._add_model_to_layout(model_name, params, defaults, self.regression_layout)
-
 
     def _add_model_to_layout(self, model_name, params, defaults, layout):
         hbox = QHBoxLayout()
@@ -192,21 +268,21 @@ class FeatureImportanceUI(QWidget):
         if not path:
             return
         try:
+            self.meta_tracker.load_from_file(path)
             df = pd.read_csv(path, comment='#')
-            self.df = df
+            self.df = df.copy()
+            self.original_path = path
+
             self.X_train = self.y_train = None
             self.select_target_variable()
-
-            # Разрешаем настройку Test Size и Random State
-            for lines in self.labels_and_lines.values():
-                if 'Test Size' in lines:
-                    lines['Test Size'].setEnabled(True)
-                if 'Random State' in lines:
-                    lines['Random State'].setEnabled(True)
 
             # Обновляем текст кнопки
             filename = os.path.basename(path)
             self.load_btn.setText(f"📁 {filename}")
+
+            # Активируем кнопку удаления
+            self.delete_columns_btn.setEnabled(True)
+            self.save_btn.setEnabled(False)
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить файл:\n{e}")
@@ -224,6 +300,8 @@ class FeatureImportanceUI(QWidget):
             return
 
         df_local = self.df.copy()
+        original_dtype = df_local[target].dtype
+
         if self.task_type == "classification" and df_local[target].dtype == 'object':
             df_local[target] = LabelEncoder().fit_transform(df_local[target])
 
@@ -236,9 +314,76 @@ class FeatureImportanceUI(QWidget):
 
         self.X_train, self.y_train = X, y
         self.target_col = target
-        self.df = None
+
+        # Оригинальные значения для display (не используется в обучении)
+        if original_dtype == 'object':
+            self.y_display = self.df[target].copy()
+        else:
+            self.y_display = self.y_train.copy()
+
         self.target_label.setText(f"Целевая переменная: {target}")
         self.analyze_btn.setEnabled(True)
+        self.delete_columns_btn.setEnabled(True)
+        self.save_btn.setEnabled(False)
+
+    def delete_selected_columns(self):
+        """Открывает диалог для удаления колонок — сортировка по важности (от слабых к сильным)"""
+        if self.X_train is None:
+            QMessageBox.warning(self, "Ошибка", "Сначала загрузите датасет.")
+            return
+
+        columns = self.X_train.columns.tolist()
+
+        # Передаём в диалог словарь с важностями (или None, если ещё не было анализа)
+        dialog = DeleteColumnsDialog(columns, importances_dict=self.feature_importances, parent=self)
+        if dialog.exec() == QDialog.Accepted:
+            to_delete = dialog.get_selected_columns()
+            if not to_delete:
+                return
+
+            to_delete_existing = [col for col in to_delete if col in self.X_train.columns]
+            if not to_delete_existing:
+                return
+
+            # Удаляем
+            self.X_train = self.X_train.drop(columns=to_delete_existing)
+
+            # Обновляем интерфейс
+            self.meta_tracker.add_change(f"удалены колонки: {', '.join(to_delete_existing)}")
+            self.save_btn.setEnabled(True)
+
+            QMessageBox.information(
+                self, "Готово",
+                f"Удалены колонки:\n" + "\n".join(to_delete_existing)
+            )
+
+    def save_dataset(self):
+        if self.X_train is None or len(self.X_train) == 0:
+            QMessageBox.warning(self, "Ошибка", "Нет данных для сохранения.")
+            return
+
+        # Собираем датасет
+        df_to_save = self.X_train.copy()
+        df_to_save[self.target_col] = self.y_train
+
+        base_name = "importance_dataset"
+        if self.original_path:
+            base_name = os.path.splitext(os.path.basename(self.original_path))[0].split("_v")[0]
+
+        save_path = os.path.join("dataset", f"{base_name}_v{self.meta_tracker.version}.csv")
+
+        try:
+            success = self.meta_tracker.save_to_file(save_path, df_to_save)
+            if success:
+                self.meta_tracker.version += 1
+                QMessageBox.information(
+                    self, "Сохранено",
+                    f"✅ Датасет сохранён:\n\n{os.path.basename(save_path)}\n\nВерсия: v{self.meta_tracker.version - 1}"
+                )
+            else:
+                QMessageBox.critical(self, "Ошибка", "Не удалось сохранить файл.")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить:\n{e}")
 
     def on_analyze(self):
         if self.X_train is None or self.y_train is None:
@@ -257,7 +402,7 @@ class FeatureImportanceUI(QWidget):
             QMessageBox.warning(self, "Ошибка", "Выберите хотя бы одну модель.")
             return
 
-        # Удаляем старые результаты (максимум 6)
+        # Очищаем старые результаты
         while self.results_layout.count() >= 6:
             item = self.results_layout.takeAt(0)
             if item.widget():
@@ -267,6 +412,9 @@ class FeatureImportanceUI(QWidget):
         X_scaled = StandardScaler().fit_transform(self.X_train)
         feature_names = self.X_train.columns.tolist()
 
+        # Сбросим словарь важности
+        self.feature_importances = {col: [] for col in feature_names}
+
         for model_name in selected:
             try:
                 params = self.labels_and_lines.get(model_name, {})
@@ -274,9 +422,14 @@ class FeatureImportanceUI(QWidget):
                 clf.fit(X_scaled, self.y_train)
                 importances = self._get_importances(clf)
 
+                # Записываем важность для каждой колонки
+                for idx, col in enumerate(feature_names):
+                    if col in self.feature_importances:
+                        self.feature_importances[col].append(importances[idx])
+
                 # ТОП-5 признаков
-                idx = np.argsort(importances)[::-1]
-                top_5 = [feature_names[i] for i in idx[:5]]
+                idx_sorted = np.argsort(importances)[::-1]
+                top_5 = [feature_names[i] for i in idx_sorted[:5]]
 
                 # === UI: Блок для модели ===
                 model_group = QGroupBox(f" {model_name} ")
