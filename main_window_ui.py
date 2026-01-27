@@ -55,9 +55,9 @@ final_training_instance = None
 class TrainingWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Обучение модели")
+        self.setWindowTitle("ML-pipeline")
         self.resize(320, 650)
-        self.setMinimumSize(300, 650)
+        self.setMinimumSize(320, 650)
 
         main_layout = QVBoxLayout()
         main_layout.setSpacing(12)
@@ -67,11 +67,11 @@ class TrainingWindow(QWidget):
         preprocessing_group = QGroupBox("🧹 Предобработка данных")
         preprocessing_layout = QVBoxLayout()
 
-        btn_check_formats = QPushButton("🔍 Загрузка и анализ датасета")
+        btn_check_formats = QPushButton("⏬Загрузка и анализ датасета")
         btn_check_formats.clicked.connect(self.open_checking_data_formats)
         preprocessing_layout.addWidget(btn_check_formats)
 
-        btn_process_nan_value = QPushButton("Обработка пропущенных значений")
+        btn_process_nan_value = QPushButton("❗️Обработка пропущенных значений")
         btn_process_nan_value.clicked.connect(self.deleteNanValue)
         preprocessing_layout.addWidget(btn_process_nan_value)
 
@@ -83,7 +83,7 @@ class TrainingWindow(QWidget):
         btn_process_fix_non_numeric.clicked.connect(self.fixNonNumericValue)
         preprocessing_layout.addWidget(btn_process_fix_non_numeric)
 
-        btn_edit_dataset = QPushButton("Редактирование датасета (SMOTE, TRIM)")
+        btn_edit_dataset = QPushButton("⚖️Балансировка классов, датасета")
         btn_edit_dataset.clicked.connect(self.openDataBalancingSmote)
         preprocessing_layout.addWidget(btn_edit_dataset)
 
@@ -115,7 +115,7 @@ class TrainingWindow(QWidget):
         analysis_layout.addWidget(btn_learning_curve)
 
         # Кросс-валидация
-        btn_cross_validation = QPushButton("🎯Кросс-валидация")
+        btn_cross_validation = QPushButton("🔄Кросс-валидация")
         btn_cross_validation.clicked.connect(self.open_cross_validation)
         analysis_layout.addWidget(btn_cross_validation)
 
@@ -123,17 +123,17 @@ class TrainingWindow(QWidget):
         main_layout.addWidget(analysis_group)
 
         # === 3. Восстановление пропусков с помощью модели ===
-        imputation_group = QGroupBox("⚙️ Восстановление пропусков с помощью модели")
+        imputation_group = QGroupBox("🔃 Восстановление пропусков с помощью модели")
         imputation_layout = QVBoxLayout()
-
-        btn_impute_model = QPushButton("🔧 Восстановить значения моделью")
-        btn_impute_model.clicked.connect(self.open_impute_by_model)
-        imputation_layout.addWidget(btn_impute_model)
-
+        
         # Опционально: кнопка разделения (если нужно оставить)
         btn_split_dataset = QPushButton("✂️ Разделение датасета")
         btn_split_dataset.clicked.connect(self.open_splitting_dataset)
         imputation_layout.addWidget(btn_split_dataset)
+
+        btn_impute_model = QPushButton("🔧 Восстановить значения моделью")
+        btn_impute_model.clicked.connect(self.open_impute_by_model)
+        imputation_layout.addWidget(btn_impute_model)
 
         imputation_group.setLayout(imputation_layout)
         main_layout.addWidget(imputation_group)
@@ -142,7 +142,7 @@ class TrainingWindow(QWidget):
         modeling_group = QGroupBox("🧠 Моделирование и инференс")
         modeling_layout = QVBoxLayout()
 
-        btn_hyperparameters_tuning = QPushButton("Подбор гиперпараметров")
+        btn_hyperparameters_tuning = QPushButton("⚙️Подбор гиперпараметров")
         btn_hyperparameters_tuning.clicked.connect(self.openHyperParametersTuning)
         modeling_layout.addWidget(btn_hyperparameters_tuning)
         
@@ -150,7 +150,7 @@ class TrainingWindow(QWidget):
         btn_final_train.clicked.connect(self.open_final_training)
         modeling_layout.addWidget(btn_final_train)
 
-        btn_inference_models = QPushButton("Инференс модели")
+        btn_inference_models = QPushButton("▶️Инференс модели")
         btn_inference_models.clicked.connect(self.openInferenceTrainedModels)
         modeling_layout.addWidget(btn_inference_models)
 
