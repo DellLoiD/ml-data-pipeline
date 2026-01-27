@@ -15,6 +15,7 @@ from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier,
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
+import gc  # Для принудительной сборки мусора
 
 
 class HelpDialog(QDialog):
@@ -42,8 +43,8 @@ class LearningCurveUI(QWidget):
         self.df = None
         self.X_train = None
         self.y_train = None
-        self.X_test = None  # ✅ Добавлено
-        self.y_test = None  # ✅ Добавлено
+        self.X_test = None
+        self.y_test = None
         self.target_col = None
         self.checkboxes = []
         self.labels_and_lines = {}
@@ -340,7 +341,7 @@ class LearningCurveUI(QWidget):
             y_test = df_test[target]
 
             self.X_train, self.y_train = X_train, y_train
-            self.X_test, self.y_test = X_test, y_test  # ✅ Сохраняем test
+            self.X_test, self.y_test = X_test, y_test 
             self.df = None
             self.target_col = target
             self.target_label.setText(f"Целевая переменная: {target}")
@@ -381,7 +382,7 @@ class LearningCurveUI(QWidget):
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
         self.X_train, self.y_train = X_train, y_train
-        self.X_test, self.y_test = X_test, y_test  # ✅ Сохраняем test
+        self.X_test, self.y_test = X_test, y_test
         self.target_col = target
         self.target_label.setText(f"Целевая переменная: {target}")
         self.analyze_btn.setEnabled(True)
@@ -414,11 +415,12 @@ class LearningCurveUI(QWidget):
         n_points = self.safe_int(self.curve_params, 'train_points', 10)
         curve_random_state = self.safe_int(self.curve_params, 'random_state', 42)
 
-        # Удаляем старые результаты (максимум 6)
-        while self.results_layout.count() >= 6:
+        # Удаляем старые результаты
+        while self.results_layout.count():
             item = self.results_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
 
         for model_name in selected:
             try:
@@ -426,7 +428,7 @@ class LearningCurveUI(QWidget):
                 clf = self._create_model(model_name, params)
                 scaler = StandardScaler()
                 X_train_scaled = scaler.fit_transform(self.X_train)
-                X_test_scaled = scaler.transform(self.X_test)  # ✅ Трансформируем test
+                X_test_scaled = scaler.transform(self.X_test)
 
                 scoring = 'accuracy' if 'Classification' in model_name else 'r2'
 
@@ -461,7 +463,7 @@ class LearningCurveUI(QWidget):
                 model_layout = QVBoxLayout()
                 model_layout.setSpacing(8)
 
-                # Final validation (из кривой)
+                # Final validation
                 row1 = QHBoxLayout()
                 lbl1 = QLabel(f"Val Final: {final_val:.4f}")
                 btn1 = QPushButton("?")
@@ -602,3 +604,29 @@ class LearningCurveUI(QWidget):
             return int(val)
         except:
             return default
+
+    # ✅ НОВЫЙ МЕТОД: Очистка при закрытии окна
+    def closeEvent(self, event):
+        """Вызывается при закрытии окна. Очищает ресурсы."""
+        # Закрываем все графики matplotlib
+        plt.close('all')
+
+        # Очищаем большие данные
+        self.df = None
+        self.X_train = None
+        self.y_train = None
+        self.X_test = None
+        self.y_test = None
+
+        # Очищаем блок результатов
+        while self.results_layout.count():
+            item = self.results_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+        # Принудительная сборка мусора
+        gc.collect()
+
+        # Вызов базового метода
+        super().closeEvent(event)

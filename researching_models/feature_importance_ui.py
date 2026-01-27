@@ -15,6 +15,7 @@ from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import LogisticRegression
 from utils.meta_tracker import MetaTracker
+import gc  # Для принудительной очистки
 
 
 class HelpDialog(QDialog):
@@ -55,20 +56,18 @@ class DeleteColumnsDialog(QDialog):
         self.checkboxes = []
         sorted_columns = columns
 
-        # Если есть данные о важности — сортируем по возрастанию (сначала наименее важные)
         if importances_dict:
             col_importance = {col: sum(importances_dict.get(col, [0])) / len(importances_dict.get(col, [0])) for col in columns}
-            sorted_columns = sorted(columns, key=lambda col: col_importance.get(col, 0))  # от низкой к высокой
+            sorted_columns = sorted(columns, key=lambda col: col_importance.get(col, 0))
         else:
             sorted_columns = sorted(columns)
 
         for idx, col in enumerate(sorted_columns):
             cb = QCheckBox(str(col))
-            cb.setChecked(False)  # ✅ Теперь не отмечены по умолчанию
+            cb.setChecked(False)
             grid.addWidget(cb, idx, 0)
             self.checkboxes.append(cb)
 
-        # Пустое пространство внизу
         grid.addItem(QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding), len(sorted_columns), 0)
 
         layout.addWidget(scroll)
@@ -99,10 +98,10 @@ class FeatureImportanceUI(QWidget):
         self.checkboxes = []
         self.labels_and_lines = {}
         self.task_type = "classification"
-        self.results_layout = None  # Горизонтальная прокрутка результатов
-        self.original_path = None  # Путь к загруженному файлу
+        self.results_layout = None
+        self.original_path = None
         self.meta_tracker = MetaTracker()
-        self.feature_importances = {}  # Словарь: {'feature': [imp1, imp2, ...]}
+        self.feature_importances = {}
         self.init_ui()
 
     def init_ui(self):
@@ -113,7 +112,6 @@ class FeatureImportanceUI(QWidget):
         title_label.setFont(QFont("Arial", 14, QFont.Bold))
         main_layout.addWidget(title_label)
 
-        # Тип задачи
         task_layout = QHBoxLayout()
         task_layout.addWidget(QLabel("Задача:"))
         self.classification_radio = QRadioButton("Классификация")
@@ -129,17 +127,14 @@ class FeatureImportanceUI(QWidget):
         task_layout.addStretch()
         main_layout.addLayout(task_layout)
 
-        # Кнопка загрузки — только один файл
         self.load_btn = QPushButton("Загрузить датасет")
         self.load_btn.clicked.connect(self.load_dataset)
         main_layout.addWidget(self.load_btn)
 
-        # Целевая переменная
         self.target_label = QLabel("Целевая переменная: не выбрана")
         self.target_label.setStyleSheet("font-weight: bold;")
         main_layout.addWidget(self.target_label)
 
-        # === Кнопки удаления и сохранения ===
         btn_layout = QHBoxLayout()
 
         self.delete_columns_btn = QPushButton("🗑️ Удалить колонки")
@@ -154,7 +149,6 @@ class FeatureImportanceUI(QWidget):
 
         main_layout.addLayout(btn_layout)
 
-        # Модели
         models_group = QGroupBox("Модели для анализа")
         models_layout = QVBoxLayout()
 
@@ -171,13 +165,11 @@ class FeatureImportanceUI(QWidget):
         models_group.setLayout(models_layout)
         main_layout.addWidget(models_group)
 
-        # Кнопка анализа
         self.analyze_btn = QPushButton("Анализировать важность признаков")
         self.analyze_btn.clicked.connect(self.on_analyze)
         self.analyze_btn.setEnabled(False)
         main_layout.addWidget(self.analyze_btn)
 
-        # === БЛОК РЕЗУЛЬТАТОВ — горизонтальная прокрутка ===
         results_group = QGroupBox("📊 Результаты важности признаков")
         results_layout = QVBoxLayout()
 
@@ -211,7 +203,6 @@ class FeatureImportanceUI(QWidget):
         results_group.setLayout(results_layout)
         main_layout.addWidget(results_group)
 
-        # === Инициализация ===
         self.setLayout(main_layout)
         self.resize(1000, 850)
         self.create_models()
@@ -220,7 +211,7 @@ class FeatureImportanceUI(QWidget):
         self.show()
 
     def on_task_selected(self):
-        self.task_type = "classification" if self.classification_radio.isChecked() else "regression"
+        self.task_type = "classification" if self.classification_radio.isChecked() else "regрессия"
         self.classification_box.setVisible(self.task_type == "classification")
         self.regression_box.setVisible(self.task_type == "regression")
 
@@ -263,7 +254,6 @@ class FeatureImportanceUI(QWidget):
         layout.addLayout(hbox)
 
     def load_dataset(self):
-        """Загружаем только один CSV файл"""
         path, _ = QFileDialog.getOpenFileName(self, "Выберите CSV", "./dataset/", "CSV (*.csv)")
         if not path:
             return
@@ -272,18 +262,12 @@ class FeatureImportanceUI(QWidget):
             df = pd.read_csv(path, comment='#')
             self.df = df.copy()
             self.original_path = path
-
             self.X_train = self.y_train = None
             self.select_target_variable()
-
-            # Обновляем текст кнопки
             filename = os.path.basename(path)
             self.load_btn.setText(f"📁 {filename}")
-
-            # Активируем кнопку удаления
             self.delete_columns_btn.setEnabled(True)
             self.save_btn.setEnabled(False)
-
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить файл:\n{e}")
 
@@ -315,7 +299,6 @@ class FeatureImportanceUI(QWidget):
         self.X_train, self.y_train = X, y
         self.target_col = target
 
-        # Оригинальные значения для display (не используется в обучении)
         if original_dtype == 'object':
             self.y_display = self.df[target].copy()
         else:
@@ -327,14 +310,11 @@ class FeatureImportanceUI(QWidget):
         self.save_btn.setEnabled(False)
 
     def delete_selected_columns(self):
-        """Открывает диалог для удаления колонок — сортировка по важности (от слабых к сильным)"""
         if self.X_train is None:
             QMessageBox.warning(self, "Ошибка", "Сначала загрузите датасет.")
             return
 
         columns = self.X_train.columns.tolist()
-
-        # Передаём в диалог словарь с важностями (или None, если ещё не было анализа)
         dialog = DeleteColumnsDialog(columns, importances_dict=self.feature_importances, parent=self)
         if dialog.exec() == QDialog.Accepted:
             to_delete = dialog.get_selected_columns()
@@ -345,10 +325,7 @@ class FeatureImportanceUI(QWidget):
             if not to_delete_existing:
                 return
 
-            # Удаляем
             self.X_train = self.X_train.drop(columns=to_delete_existing)
-
-            # Обновляем интерфейс
             self.meta_tracker.add_change(f"удалены колонки: {', '.join(to_delete_existing)}")
             self.save_btn.setEnabled(True)
 
@@ -362,7 +339,6 @@ class FeatureImportanceUI(QWidget):
             QMessageBox.warning(self, "Ошибка", "Нет данных для сохранения.")
             return
 
-        # Собираем датасет
         df_to_save = self.X_train.copy()
         df_to_save[self.target_col] = self.y_train
 
@@ -402,17 +378,13 @@ class FeatureImportanceUI(QWidget):
             QMessageBox.warning(self, "Ошибка", "Выберите хотя бы одну модель.")
             return
 
-        # Очищаем старые результаты
         while self.results_layout.count() >= 6:
             item = self.results_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
 
-        # Общие преобразования
         X_scaled = StandardScaler().fit_transform(self.X_train)
         feature_names = self.X_train.columns.tolist()
-
-        # Сбросим словарь важности
         self.feature_importances = {col: [] for col in feature_names}
 
         for model_name in selected:
@@ -422,16 +394,13 @@ class FeatureImportanceUI(QWidget):
                 clf.fit(X_scaled, self.y_train)
                 importances = self._get_importances(clf)
 
-                # Записываем важность для каждой колонки
                 for idx, col in enumerate(feature_names):
                     if col in self.feature_importances:
                         self.feature_importances[col].append(importances[idx])
 
-                # ТОП-5 признаков
                 idx_sorted = np.argsort(importances)[::-1]
                 top_5 = [feature_names[i] for i in idx_sorted[:5]]
 
-                # === UI: Блок для модели ===
                 model_group = QGroupBox(f" {model_name} ")
                 model_group.setStyleSheet("""
                     QGroupBox {
@@ -446,14 +415,12 @@ class FeatureImportanceUI(QWidget):
                 model_layout = QVBoxLayout()
                 model_layout.setSpacing(8)
 
-                # ТОП-5
                 top_text = QTextEdit()
                 top_text.setPlainText(f"ТОП-5:\n" + "\n".join([f"• {f}" for f in top_5]))
                 top_text.setFixedHeight(100)
                 top_text.setReadOnly(True)
                 model_layout.addWidget(top_text)
 
-                # Кнопка графика
                 plot_btn = QPushButton("📊 График")
                 plot_btn.clicked.connect(
                     lambda ch, imp=importances, names=feature_names, mn=model_name:
@@ -559,3 +526,27 @@ class FeatureImportanceUI(QWidget):
             return int(val)
         except:
             return default
+
+    # ✅ НОВЫЙ МЕТОД: Очистка при закрытии окна
+    def closeEvent(self, event):
+        """Очищает ресурсы при закрытии окна"""
+        # Закрываем все matplotlib-графики
+        plt.close('all')
+
+        # Очищаем данные
+        self.df = None
+        self.X_train = None
+        self.y_train = None
+        self.feature_importances = {}
+
+        # Очищаем результаты
+        while self.results_layout.count():
+            item = self.results_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+        # Принудительная сборка мусора
+        gc.collect()
+
+        super().closeEvent(event)

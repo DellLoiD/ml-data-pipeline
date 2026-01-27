@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from utils.meta_tracker import MetaTracker  # Импорт трекера
+import gc
 
 
 class CorrelationGraphUI(QWidget):
@@ -22,6 +23,8 @@ class CorrelationGraphUI(QWidget):
         self.removed_column = None
         self._last_loaded_path = None
         self.meta_tracker = MetaTracker(max_line_length=150)
+        self.graph_window = None  # Для отслеживания окна графика
+        self.canvas = None
         self.initUI()
 
     def initUI(self):
@@ -160,6 +163,11 @@ class CorrelationGraphUI(QWidget):
 
         num_cols = numeric_df.columns.tolist()
 
+        # Уничтожаем предыдущее окно, если оно есть
+        if self.graph_window:
+            self.graph_window.close()
+            self.graph_window = None
+
         # Создаём новое окно
         graph_window = QWidget()
         graph_window.setWindowTitle("Матрица корреляций с описанием параметров")
@@ -224,11 +232,50 @@ class CorrelationGraphUI(QWidget):
         main_layout.addWidget(splitter)
         graph_window.setLayout(main_layout)
 
-        # ✅ ВАЖНО: сохраняем ссылки, чтобы объекты не удалились
+        # Сохраняем ссылки
         self.graph_window = graph_window
-        self.canvas = canvas  # ← Это предотвращает удаление
+        self.canvas = canvas
+
+        # Привязываем закрытие окна к очистке
+        self.graph_window.setAttribute(Qt.WA_DeleteOnClose)
+        self.graph_window.destroyed.connect(self.on_graph_window_closed)
 
         graph_window.show()
+
+    def on_graph_window_closed(self):
+        """Вызывается при уничтожении окна графика"""
+        self.canvas = None
+        plt.close('all')  # Закрываем все фигуры matplotlib
+        gc.collect()
+        
+    def closeEvent(self, event):
+        """Очистка при закрытии основного окна"""
+        # Закрываем окно графика, если оно существует и ещё не удалено
+        if self.graph_window is not None:
+            try:
+                # Проверим, можно ли ещё вызывать методы
+                if not self.isAncestorOf(self.graph_window): 
+                    pass
+                else:
+                    self.graph_window.close()
+            except RuntimeError:
+                # Объект уже удалён — игнорируем
+                pass
+            finally:
+                self.graph_window = None 
+
+        # Явно закрываем все matplotlib-окна
+        plt.close('all')
+
+        # Очищаем данные
+        self.df = None
+        self.canvas = None
+
+        # Сборка мусора
+        import gc
+        gc.collect()
+
+        super().closeEvent(event)
 
 
     def saveProcessedData(self):

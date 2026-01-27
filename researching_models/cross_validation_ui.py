@@ -15,6 +15,7 @@ from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier,
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
+import gc  # Для принудительной очистки памяти
 
 
 class HelpDialog(QDialog):
@@ -26,7 +27,6 @@ class HelpDialog(QDialog):
         self.resize(400, 300)
 
         layout = QVBoxLayout()
-
         title_label = QLabel(f"<b>{title}</b>")
         title_label.setFont(QFont("Arial", 12, QFont.Bold))
         layout.addWidget(title_label)
@@ -34,7 +34,6 @@ class HelpDialog(QDialog):
         text_label = QLabel(text)
         text_label.setWordWrap(True)
         layout.addWidget(text_label)
-
         self.setLayout(layout)
 
 
@@ -44,8 +43,8 @@ class CrossValidationUI(QWidget):
         self.df = None
         self.X_train = None
         self.y_train = None
-        self.X_test = None  # ✅ Добавлено
-        self.y_test = None  # ✅ Добавлено
+        self.X_test = None
+        self.y_test = None
         self.target_col = None
         self.checkboxes = []
         self.labels_and_lines = {}
@@ -342,7 +341,6 @@ class CrossValidationUI(QWidget):
             X_test = df_test.drop(columns=[target])
             y_test = df_test[target]
 
-            # Сохраняем и обучаемые, и тестовые данные
             self.X_train, self.y_train = X_train, y_train
             self.X_test, self.y_test = X_test, y_test
 
@@ -386,7 +384,7 @@ class CrossValidationUI(QWidget):
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
         self.X_train, self.y_train = X_train, y_train
-        self.X_test, self.y_test = X_test, y_test  # ✅ Сохраняем test
+        self.X_test, self.y_test = X_test, y_test
         self.target_col = target
         self.target_label.setText(f"Целевая переменная: {target}")
         self.analyze_btn.setEnabled(True)
@@ -418,34 +416,31 @@ class CrossValidationUI(QWidget):
         n_jobs = self.safe_int(self.cv_params, 'n_jobs', -1)
         random_state = self.safe_int(self.cv_params, 'random_state', 42)
 
-        # Удаляем старые результаты (максимум 6)
-        while self.results_layout.count() >= 6:
+        # Удаляем старые результаты
+        while self.results_layout.count():
             item = self.results_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
 
         for model_name in selected:
             try:
                 params = self.labels_and_lines.get(model_name, {})
                 model = self._create_model(model_name, params)
 
-                # Подготовка данных
                 scaler = StandardScaler()
                 X_train_scaled = scaler.fit_transform(self.X_train)
-                X_test_scaled = scaler.transform(self.X_test)  # ✅ Трансформируем test
+                X_test_scaled = scaler.transform(self.X_test)
 
                 scoring = 'accuracy' if 'Classification' in model_name else 'r2'
 
-                # Кросс-валидация на train
                 scores = cross_val_score(model, X_train_scaled, self.y_train, cv=cv, scoring=scoring, n_jobs=n_jobs)
                 cv_mean = np.mean(scores)
                 cv_std = np.std(scores)
 
-                # Обучение на всём train и оценка на test
                 model.fit(X_train_scaled, self.y_train)
                 final_score = model.score(X_test_scaled, self.y_test)
 
-                # === UI: Отображение результатов ===
                 model_group = QGroupBox(f" {model_name} ")
                 model_group.setStyleSheet("""
                     QGroupBox {
@@ -460,7 +455,6 @@ class CrossValidationUI(QWidget):
                 model_layout = QVBoxLayout()
                 model_layout.setSpacing(8)
 
-                # CV среднее
                 row1 = QHBoxLayout()
                 lbl1 = QLabel(f"CV среднее: {cv_mean:.4f}")
                 btn1 = QPushButton("?")
@@ -473,7 +467,6 @@ class CrossValidationUI(QWidget):
                 row1.addWidget(btn1)
                 model_layout.addLayout(row1)
 
-                # CV std
                 row2 = QHBoxLayout()
                 lbl2 = QLabel(f"CV std: ±{cv_std:.4f}")
                 btn2 = QPushButton("?")
@@ -485,7 +478,6 @@ class CrossValidationUI(QWidget):
                 row2.addWidget(btn2)
                 model_layout.addLayout(row2)
 
-                # Final test
                 row3 = QHBoxLayout()
                 lbl3 = QLabel(f"Final Test: {final_score:.4f}")
                 btn3 = QPushButton("?")
@@ -498,7 +490,6 @@ class CrossValidationUI(QWidget):
                 row3.addWidget(btn3)
                 model_layout.addLayout(row3)
 
-                # Кнопка графика
                 plot_btn = QPushButton("📊 График CV")
                 plot_btn.clicked.connect(
                     lambda ch, s=scores, mn=model_name, sc=scoring, rs=random_state:
@@ -612,3 +603,28 @@ class CrossValidationUI(QWidget):
             return int(val)
         except:
             return default
+
+    # ✅ ДОБАВЛЕН: closeEvent для очистки
+    def closeEvent(self, event):
+        """Вызывается при закрытии окна. Очищает ресурсы."""
+        # Закрываем все графики matplotlib
+        plt.close('all')
+
+        # Очищаем данные
+        self.df = None
+        self.X_train = None
+        self.y_train = None
+        self.X_test = None
+        self.y_test = None
+
+        # Очищаем блок результатов
+        while self.results_layout.count():
+            item = self.results_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+        # Принудительная сборка мусора
+        gc.collect()
+
+        super().closeEvent(event)

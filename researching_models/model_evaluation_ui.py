@@ -7,6 +7,7 @@ from PySide6.QtGui import QFont
 from PySide6.QtCore import Qt
 import os
 import pandas as pd
+import gc  # Для принудительной очистки памяти
 from .model_evaluation_logic import ModelEvaluator
 
 
@@ -54,7 +55,6 @@ class ModelEvaluationUI(QWidget):
         self.select_dataset_btn.setEnabled(False)
         main_layout.addWidget(self.select_dataset_btn)
 
-        # Заменяем комбобокс на метку
         self.target_label = QLabel("Целевая переменная: не выбрана")
         self.target_label.setStyleSheet("font-weight: bold;")
         main_layout.addWidget(self.target_label)
@@ -83,7 +83,6 @@ class ModelEvaluationUI(QWidget):
         results_group = QGroupBox("Результаты оценки моделей")
         results_layout = QVBoxLayout()
 
-        # Горизонтальный слой для нескольких результатов
         self.results_layout = QHBoxLayout()
         scroll_content = QWidget()
         scroll_content.setLayout(self.results_layout)
@@ -251,10 +250,9 @@ class ModelEvaluationUI(QWidget):
             y_train = df_train[target]
             y_test = df_test[target]
 
-            # Сохраняем в evaluator
             self.evaluator.set_split_data(X_train, X_test, y_train, y_test, target)
             self.X_train, self.X_test, self.y_train, self.y_test = X_train, X_test, y_train, y_test
-            self.df = None  # Очищаем df
+            self.df = None
 
             self.target_label.setText(f"Целевая переменная: {target}")
             self.select_dataset_btn.setText(f"📁 train: {os.path.basename(train_path)}\n   test: {os.path.basename(test_path)}")
@@ -284,21 +282,42 @@ class ModelEvaluationUI(QWidget):
             return
 
         self.target_label.setText(f"Целевая переменная: {target}")
-        self.evaluator.update_dataframe(self.df, target)  # ✅ evaluator сохраняет self.target_col
+        self.evaluator.update_dataframe(self.df, target)
 
     def on_evaluate_models_clicked(self):
-        # ✅ ОСНОВНАЯ ПОПРАВКА: ПРОВЕРЯЕМ evaluator.target_col, а не self.target_col
         if self.df is None and (self.X_train is None or self.y_train is None):
             QMessageBox.warning(self, "Предупреждение", "Сначала загрузите датасет!")
             return
 
-        # ❌ Было: if self.target_col is None and ...
-        # ✅ Стало: проверяем evaluator.target_col
         if self.evaluator.target_col is None:
             QMessageBox.warning(self, "Предупреждение", "Выберите целевую переменную!")
             return
 
-        # Передаём task_type в evaluator
         self.evaluator.task_type = self.selected_task
-
         self.evaluator.evaluate_models()
+
+    # ✅ НОВЫЙ МЕТОД: Очистка при закрытии окна
+    def closeEvent(self, event):
+        """Очищает данные и ресурсы при закрытии окна"""
+        # Очищаем данные
+        self.df = None
+        self.X_train = None
+        self.X_test = None
+        self.y_train = None
+        self.y_test = None
+
+        # Очищаем результаты
+        while self.results_layout.count():
+            item = self.results_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+        # Удаляем evaluator, если он содержит ссылки
+        if hasattr(self, 'evaluator'):
+            self.evaluator = None
+
+        # Принудительная сборка мусора
+        gc.collect()
+
+        super().closeEvent(event)
