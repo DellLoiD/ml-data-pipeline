@@ -454,16 +454,38 @@ class ParameterTuningWindow(QWidget):
                 result[k] = [self.serialize_params({'item': x})['item'] for x in v]
             else:
                 result[k] = str(v)
-        return result
-
+            return result
+        
     def closeEvent(self, event):
-        if self.worker and self.worker.isRunning():
-            QMessageBox.warning(
-                self,
-                "Подождите",
-                "Обучение ещё идёт. Нельзя закрыть окно до завершения.\n"
-                "Нажмите 'Прервать обучение', чтобы остановить."
-            )
-            event.ignore()
-        else:
-            event.accept()
+        # ✅ Безопасная остановка worker
+        if hasattr(self, 'worker') and self.worker is not None:
+            try:
+                if self.worker.isRunning():
+                    print("Запрос на остановку подбора параметров...")
+                    self.worker.stop()  # Наш мягкий стоп
+                    self.worker.quit()
+                    self.worker.wait(2000)  # Ждём до 2 секунд
+            except RuntimeError:
+                pass  # Объект уже удалён — игнорируем
+            finally:
+                self.worker = None  
+
+        # Очищаем данные
+        self.df = None
+        self.X_train = None
+        self.y_train = None
+        self.X_test = None
+        self.y_test = None
+
+        # Очистка layout
+        if hasattr(self, 'metrics_layout'):
+            self._clear_layout(self.metrics_layout)
+            item = self.results_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+        # Сборка мусора
+        import gc; gc.collect()
+
+        super().closeEvent(event)

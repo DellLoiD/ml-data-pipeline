@@ -167,7 +167,7 @@ class RandomSearchConfigGUI(QWidget):
                            "0 — тихо, 1 — информация по итерациям, 2 — подробно."
             },
             'n_jobs': {
-                "default": -1,
+                "default": 1,
                 "tooltip": "Количество ядер CPU.\n"
                            "-1 = все доступные ядра."
             }
