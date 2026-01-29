@@ -15,7 +15,9 @@ from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier,
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
-import gc  # Для принудительной сборки мусора
+import gc
+import psutil  
+from joblib import parallel_backend  
 
 
 class HelpDialog(QDialog):
@@ -51,6 +53,7 @@ class LearningCurveUI(QWidget):
         self.task_type = "classification"
         self.results_layout = None
         self.curve_params = {}
+        self.process = psutil.Process(os.getpid())
         self.init_ui()
 
     def init_ui(self):
@@ -87,6 +90,11 @@ class LearningCurveUI(QWidget):
         self.target_label.setStyleSheet("font-weight: bold;")
         main_layout.addWidget(self.target_label)
 
+        # 🔺 МЕТКА ДЛЯ ОТОБРАЖЕНИЯ ПАМЯТИ
+        self.memory_label = QLabel("📊 Память: ? МБ")
+        self.memory_label.setStyleSheet("color: #555; font-size: 11px;")
+        main_layout.addWidget(self.memory_label)
+
         # Модели
         models_group = QGroupBox("Модели для анализа")
         models_layout = QVBoxLayout()
@@ -112,7 +120,7 @@ class LearningCurveUI(QWidget):
 
         params = [
             ("CV", "5", "Количество фолдов кросс-валидации.\n\n• 5 — баланс\n• Меньше → быстрее, менее стабильно"),
-            ("n_jobs", "-1", "Число процессов.\n\n• -1 = все ядра\n• 1 = один поток (стабильнее)"),
+            ("n_jobs", "1", "Число процессов.\n\n• -1 = все ядра\n• 1 = один поток (стабильнее)"),
             ("Число точек", "10", "Сколько точек на графике.\n\n• 10 — оптимально\n• Больше → точнее, но дольше"),
             ("Random State", "42", "Контроль случайности.\n\n• Фиксированное значение → воспроизводимость")
         ]
@@ -168,7 +176,7 @@ class LearningCurveUI(QWidget):
         main_layout.addWidget(self.analyze_btn)
 
         # === БЛОК РЕЗУЛЬТАТОВ ===
-        results_group = QGroupBox("📊 Результаты кривой обучения")
+        results_group = QGroupBox("📊 Результаты кривой обучения (история)")
         results_layout = QVBoxLayout()
 
         help_label = QLabel(
@@ -210,6 +218,42 @@ class LearningCurveUI(QWidget):
         self.classification_box.setVisible(self.task_type == "classification")
         self.regression_box.setVisible(self.task_type == "regression")
 
+        # 🔺 Обновляем память при старте
+        self.update_memory_usage()
+
+    def kill_child_processes(self):
+        """Принудительно завершает все дочерние процессы (например, от joblib)"""
+        try:
+            parent = psutil.Process(os.getpid())
+            children = parent.children(recursive=True)
+
+            if not children:
+                return
+
+            for child in children:
+                try:
+                    child.terminate()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+
+            gone, alive = psutil.wait_procs(children, timeout=3)
+            for p in alive:
+                try:
+                    p.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+        except Exception as e:
+            print(f"Ошибка при завершении процессов: {e}")
+
+    def update_memory_usage(self):
+        """Обновляет метку с текущим использованием ОЗУ"""
+        try:
+            mem_info = self.process.memory_info()
+            mem_mb = mem_info.rss / 1024 / 1024  # в МБ
+            self.memory_label.setText(f"📊 Память: {mem_mb:.1f} МБ")
+        except Exception as e:
+            self.memory_label.setText("📊 Память: ошибка")
+
     def _add_model_to_layout(self, model_name, params, defaults, layout):
         hbox = QHBoxLayout()
         cb = QCheckBox(model_name)
@@ -222,26 +266,17 @@ class LearningCurveUI(QWidget):
             le.setFixedWidth(80)
             le.setText(defaults.get(param, "0"))
 
-            if param == 'Test Size':
-                help_text = "Доля данных, выделяемая на тест.\nНапример, 0.2 = 20%"
-            elif param == 'Кол-во деревьев':
-                help_text = "Число деревьев в ансамбле.\nБольше → точнее, но дольше"
-            elif param == 'Max Depth':
-                help_text = "Максимальная глубина одного дерева.\nNone = не ограничена\nБольше → риск переобучения"
-            elif param == 'Min Samples Split':
-                help_text = "Минимальное число образцов, чтобы разделить узел.\nБольше → проще модель"
-            elif param == 'Learning Rate':
-                help_text = "Скорость обучения в Gradient Boosting.\nМеньше → стабильнее, но медленнее"
-            elif param == 'C':
-                help_text = "Сила регуляризации в Logistic Regression.\nБольше → слабее регуляризация"
-            elif param == 'Max Iterations':
-                help_text = "Максимальное число итераций обучения.\nУвеличьте, если модель не сходится"
-            elif param == 'Penalty':
-                help_text = "Тип регуляризации: l1, l2, elasticnet, none"
-            elif param == 'Random State':
-                help_text = "Фиксация случайных процессов для воспроизводимости результатов"
-            else:
-                help_text = param
+            help_text = {
+                'Test Size': "Доля данных, выделяемая на тест.\nНапример, 0.2 = 20%",
+                'Кол-во деревьев': "Число деревьев в ансамбле.\nБольше → точнее, но дольше",
+                'Max Depth': "Максимальная глубина одного дерева.\nNone = не ограничена\nБольше → риск переобучения",
+                'Min Samples Split': "Минимальное число образцов, чтобы разделить узел.\nБольше → проще модель",
+                'Learning Rate': "Скорость обучения в Gradient Boosting.\nМеньше → стабильнее, но медленнее",
+                'C': "Сила регуляризации в Logistic Regression.\nБольше → слабее регуляризация",
+                'Max Iterations': "Максимальное число итераций обучения.\nУвеличьте, если модель не сходится",
+                'Penalty': "Тип регуляризации: l1, l2, elasticnet, none",
+                'Random State': "Фиксация случайных процессов для воспроизводимости результатов"
+            }.get(param, param)
 
             btn = QPushButton("?")
             btn.setFixedSize(20, 20)
@@ -266,8 +301,8 @@ class LearningCurveUI(QWidget):
             'Gradient Boosting Regression': ['Test Size', 'Кол-во деревьев', 'Learning Rate', 'Max Depth', 'Random State']
         }
         defaults = {
-            'Test Size': '0.2', 'Кол-во деревьев': '100', 'Max Depth': 'None', 'Min Samples Split': '2', 'Random State': '42',
-            'Learning Rate': '0.1', 'C': '1.0', 'Max Iterations': '100', 'Penalty': 'l2'
+            'Test Size': '0.2', 'Кол-во деревьев': '100', 'Max Depth': 'None', 'Min Samples Split': '2',
+            'Random State': '42', 'Learning Rate': '0.1', 'C': '1.0', 'Max Iterations': '100', 'Penalty': 'l2'
         }
 
         for model_name, params in clf_models.items():
@@ -308,6 +343,8 @@ class LearningCurveUI(QWidget):
                     lines['Test Size'].setEnabled(True)
                 if 'Random State' in lines:
                     lines['Random State'].setEnabled(True)
+
+            self.update_memory_usage()
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не загружен:\n{e}")
 
@@ -341,7 +378,7 @@ class LearningCurveUI(QWidget):
             y_test = df_test[target]
 
             self.X_train, self.y_train = X_train, y_train
-            self.X_test, self.y_test = X_test, y_test 
+            self.X_test, self.y_test = X_test, y_test
             self.df = None
             self.target_col = target
             self.target_label.setText(f"Целевая переменная: {target}")
@@ -357,6 +394,7 @@ class LearningCurveUI(QWidget):
                 if 'Random State' in lines:
                     lines['Random State'].setEnabled(False)
 
+            self.update_memory_usage()
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка загрузки:\n{e}")
 
@@ -393,7 +431,11 @@ class LearningCurveUI(QWidget):
             if 'Random State' in lines:
                 lines['Random State'].setEnabled(True)
 
+        self.update_memory_usage()
+
     def on_analyze(self):
+        self.kill_child_processes()
+        self.update_memory_usage()
         if self.X_train is None or self.y_train is None:
             QMessageBox.warning(self, "Ошибка", "Нет данных для анализа.")
             return
@@ -401,26 +443,15 @@ class LearningCurveUI(QWidget):
             QMessageBox.warning(self, "Ошибка", "Целевая переменная не выбрана.")
             return
 
-        selected = {}
-        for cb in self.checkboxes:
-            if cb.isChecked():
-                selected[cb.text()] = True
-
+        selected = {cb.text(): True for cb in self.checkboxes if cb.isChecked()}
         if not selected:
             QMessageBox.warning(self, "Ошибка", "Выберите хотя бы одну модель.")
             return
 
         cv = self.safe_int(self.curve_params, 'cv', 5)
-        n_jobs = self.safe_int(self.curve_params, 'n_jobs', -1)
+        n_jobs = self.safe_int(self.curve_params, 'n_jobs', 1)
         n_points = self.safe_int(self.curve_params, 'train_points', 10)
         curve_random_state = self.safe_int(self.curve_params, 'random_state', 42)
-
-        # Удаляем старые результаты
-        while self.results_layout.count():
-            item = self.results_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
 
         for model_name in selected:
             try:
@@ -432,19 +463,18 @@ class LearningCurveUI(QWidget):
 
                 scoring = 'accuracy' if 'Classification' in model_name else 'r2'
 
-                # Кривая обучения на train
-                train_sizes, train_scores, val_scores = learning_curve(
-                    clf, X_train_scaled, self.y_train,
-                    train_sizes=np.linspace(0.1, 1.0, n_points),
-                    cv=cv, scoring=scoring, n_jobs=n_jobs, random_state=curve_random_state
-                )
+                with parallel_backend('loky', n_jobs=n_jobs):
+                    train_sizes, train_scores, val_scores = learning_curve(
+                        clf, X_train_scaled, self.y_train,
+                        train_sizes=np.linspace(0.1, 1.0, n_points),
+                        cv=cv, scoring=scoring, n_jobs=n_jobs, random_state=curve_random_state
+                    )
 
                 train_mean = np.mean(train_scores, axis=1)
                 val_mean = np.mean(val_scores, axis=1)
                 final_val = val_mean[-1]
                 gap = train_mean[-1] - final_val
 
-                # Обучение и оценка на test
                 clf.fit(X_train_scaled, self.y_train)
                 final_test_score = clf.score(X_test_scaled, self.y_test)
 
@@ -463,7 +493,7 @@ class LearningCurveUI(QWidget):
                 model_layout = QVBoxLayout()
                 model_layout.setSpacing(8)
 
-                # Final validation
+                # Val Final
                 row1 = QHBoxLayout()
                 lbl1 = QLabel(f"Val Final: {final_val:.4f}")
                 btn1 = QPushButton("?")
@@ -489,7 +519,7 @@ class LearningCurveUI(QWidget):
                 row2.addWidget(btn2)
                 model_layout.addLayout(row2)
 
-                # Final test
+                # Test
                 row3 = QHBoxLayout()
                 lbl3 = QLabel(f"Test: {final_test_score:.4f}")
                 btn3 = QPushButton("?")
@@ -502,19 +532,39 @@ class LearningCurveUI(QWidget):
                 row3.addWidget(btn3)
                 model_layout.addLayout(row3)
 
+                # 🔺 Параметры модели
+                param_text = "<br>".join([f"{k}: {v.text().strip()}" for k, v in params.items()])
+                params_label = QLabel(f"<small><b>Параметры:</b><br>{param_text}</small>")
+                params_label.setWordWrap(True)
+                params_label.setStyleSheet("font-size: 14px; color: #777;")
+                model_layout.addWidget(params_label)
+
                 # Кнопка графика
                 plot_btn = QPushButton("📈 График")
                 plot_btn.clicked.connect(
-                    lambda ch, sizes=train_sizes, t_mean=train_mean, v_mean=val_mean, mn=model_name, s=scoring:
-                    self.plot_curve(sizes, t_mean, v_mean, mn, s)
+                    lambda ch, sizes=train_sizes.copy(),
+                                    t_mean=train_mean.copy(),
+                                    v_mean=val_mean.copy(),
+                                    mn=model_name,
+                                    s=scoring:
+                        self.plot_curve(sizes, t_mean, v_mean, mn, s)
                 )
                 model_layout.addWidget(plot_btn)
 
                 model_group.setLayout(model_layout)
                 self.results_layout.addWidget(model_group)
 
+                # 🔺 Логика: максимум 3 блока, удаляем самый левый
+                while self.results_layout.count() > 3:
+                    item = self.results_layout.takeAt(0)
+                    widget = item.widget()
+                    if widget:
+                        widget.deleteLater()
+
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Ошибка при анализе {model_name}:\n{e}")
+
+        self.update_memory_usage()
 
     def plot_curve(self, train_sizes, train_mean, val_mean, model_name, scoring):
         plt.figure(figsize=(10, 6))
@@ -526,6 +576,7 @@ class LearningCurveUI(QWidget):
         plt.legend(loc='best')
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
+        self.kill_child_processes()
         plt.show()
 
     def _create_model(self, name, params):
@@ -581,14 +632,11 @@ class LearningCurveUI(QWidget):
 
     def safe_int(self, container, key, default):
         try:
-            if isinstance(container, dict) and key in container:
-                val = container[key].text().strip()
-            else:
-                val = container.text().strip()
+            val = container[key].text().strip()
             return int(val) if val else default
         except:
             return default
-
+        
     def safe_float(self, params, key, default):
         try:
             val = params[key].text().strip()
@@ -605,28 +653,14 @@ class LearningCurveUI(QWidget):
         except:
             return default
 
-    # ✅ НОВЫЙ МЕТОД: Очистка при закрытии окна
     def closeEvent(self, event):
-        """Вызывается при закрытии окна. Очищает ресурсы."""
-        # Закрываем все графики matplotlib
+        self.kill_child_processes()
         plt.close('all')
-
-        # Очищаем большие данные
         self.df = None
         self.X_train = None
         self.y_train = None
         self.X_test = None
         self.y_test = None
-
-        # Очищаем блок результатов
-        while self.results_layout.count():
-            item = self.results_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
-
-        # Принудительная сборка мусора
+        self.clear_results()
         gc.collect()
-
-        # Вызов базового метода
         super().closeEvent(event)

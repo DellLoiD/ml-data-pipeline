@@ -16,6 +16,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 import gc  # Для принудительной очистки памяти
+import psutil
+from joblib import parallel_backend
 
 
 class HelpDialog(QDialog):
@@ -51,6 +53,7 @@ class CrossValidationUI(QWidget):
         self.task_type = "classification"
         self.results_layout = None
         self.cv_params = {}
+        self.process = psutil.Process(os.getpid())  # 🔺 Для мониторинга памяти
         self.init_ui()
 
     def init_ui(self):
@@ -86,6 +89,11 @@ class CrossValidationUI(QWidget):
         self.target_label = QLabel("Целевая переменная: не выбрана")
         self.target_label.setStyleSheet("font-weight: bold;")
         main_layout.addWidget(self.target_label)
+
+        # 🔺 МЕТКА ДЛЯ ОТОБРАЖЕНИЯ ПАМЯТИ
+        self.memory_label = QLabel("📊 Память: ? МБ")
+        self.memory_label.setStyleSheet("color: #555; font-size: 11px;")
+        main_layout.addWidget(self.memory_label)
 
         # Модели
         models_group = QGroupBox("Модели для анализа")
@@ -210,6 +218,42 @@ class CrossValidationUI(QWidget):
         self.resize(1000, 850)
         self.show()
 
+        # 🔺 Обновляем память при старте
+        self.update_memory_usage()
+
+    def kill_child_processes(self):
+        """Принудительно завершает все дочерние процессы (например, от joblib)"""
+        try:
+            parent = psutil.Process(os.getpid())
+            children = parent.children(recursive=True)
+
+            if not children:
+                return
+
+            for child in children:
+                try:
+                    child.terminate()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+
+            gone, alive = psutil.wait_procs(children, timeout=3)
+            for p in alive:
+                try:
+                    p.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+        except Exception as e:
+            print(f"Ошибка при завершении процессов: {e}")
+
+    def update_memory_usage(self):
+        """Обновляет метку с текущим использованием ОЗУ"""
+        try:
+            mem_info = self.process.memory_info()
+            mem_mb = mem_info.rss / 1024 / 1024  # в МБ
+            self.memory_label.setText(f"📊 Память: {mem_mb:.1f} МБ")
+        except Exception as e:
+            self.memory_label.setText("📊 Память: ошибка")
+
     def _add_model_to_layout(self, model_name, params, defaults, layout):
         hbox = QHBoxLayout()
         cb = QCheckBox(model_name)
@@ -309,6 +353,8 @@ class CrossValidationUI(QWidget):
                     lines['Test Size'].setEnabled(True)
                 if 'Random State' in lines:
                     lines['Random State'].setEnabled(True)
+
+            self.update_memory_usage()
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Датасет не загружен:\n{e}")
 
@@ -359,6 +405,7 @@ class CrossValidationUI(QWidget):
                 if 'Random State' in lines:
                     lines['Random State'].setEnabled(False)
 
+            self.update_memory_usage()
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка загрузки:\n{e}")
 
@@ -395,7 +442,12 @@ class CrossValidationUI(QWidget):
             if 'Random State' in lines:
                 lines['Random State'].setEnabled(True)
 
+        self.update_memory_usage()
+
     def on_analyze(self):
+        self.kill_child_processes()  # 🔥 Убиваем возможные остаточные процессы
+        self.update_memory_usage()
+
         if self.X_train is None or self.y_train is None:
             QMessageBox.warning(self, "Ошибка", "Нет данных для анализа.")
             return
@@ -416,13 +468,6 @@ class CrossValidationUI(QWidget):
         n_jobs = self.safe_int(self.cv_params, 'n_jobs', -1)
         random_state = self.safe_int(self.cv_params, 'random_state', 42)
 
-        # Удаляем старые результаты
-        while self.results_layout.count():
-            item = self.results_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
-
         for model_name in selected:
             try:
                 params = self.labels_and_lines.get(model_name, {})
@@ -434,13 +479,16 @@ class CrossValidationUI(QWidget):
 
                 scoring = 'accuracy' if 'Classification' in model_name else 'r2'
 
-                scores = cross_val_score(model, X_train_scaled, self.y_train, cv=cv, scoring=scoring, n_jobs=n_jobs)
+                with parallel_backend('loky', n_jobs=n_jobs):
+                    scores = cross_val_score(model, X_train_scaled, self.y_train, cv=cv, scoring=scoring, n_jobs=n_jobs)
+
                 cv_mean = np.mean(scores)
                 cv_std = np.std(scores)
 
                 model.fit(X_train_scaled, self.y_train)
                 final_score = model.score(X_test_scaled, self.y_test)
 
+                # === UI: Отображение результатов ===
                 model_group = QGroupBox(f" {model_name} ")
                 model_group.setStyleSheet("""
                     QGroupBox {
@@ -490,6 +538,13 @@ class CrossValidationUI(QWidget):
                 row3.addWidget(btn3)
                 model_layout.addLayout(row3)
 
+                # 🔺 Параметры модели
+                param_text = "<br>".join([f"{k}: {v.text().strip()}" for k, v in params.items()])
+                params_label = QLabel(f"<small><b>Параметры:</b><br>{param_text}</small>")
+                params_label.setWordWrap(True)
+                params_label.setStyleSheet("font-size: 14px; color: #777;")
+                model_layout.addWidget(params_label)
+
                 plot_btn = QPushButton("📊 График CV")
                 plot_btn.clicked.connect(
                     lambda ch, s=scores, mn=model_name, sc=scoring, rs=random_state:
@@ -500,10 +555,22 @@ class CrossValidationUI(QWidget):
                 model_group.setLayout(model_layout)
                 self.results_layout.addWidget(model_group)
 
+                # 🔺 Логика: максимум 3 блока, удаляем самый левый
+                while self.results_layout.count() > 3:
+                    item = self.results_layout.takeAt(0)
+                    widget = item.widget()
+                    if widget:
+                        widget.deleteLater()
+
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Ошибка при анализе {model_name}:\n{e}")
 
+        self.update_memory_usage()
+
     def plot_cv_scores(self, scores, model_name, scoring, random_state):
+        # 🔥 Убиваем оставшиеся процессы перед открытием графика
+        self.kill_child_processes()
+
         folds = np.arange(1, len(scores) + 1)
         mean_score = np.mean(scores)
         std_score = np.std(scores)
@@ -527,6 +594,9 @@ class CrossValidationUI(QWidget):
         plt.tight_layout()
         plt.show()
 
+        # 🔺 Обновляем память после закрытия графика (выполняется после show())
+        self.update_memory_usage()
+        
     def _create_model(self, name, params):
         random_state = self.safe_int(params, 'Random State', 42)
         n_estimators = self.safe_int(params, 'Кол-во деревьев', 100)
