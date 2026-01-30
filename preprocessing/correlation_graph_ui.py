@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
-from utils.meta_tracker import MetaTracker  # Импорт трекера
+from utils.meta_tracker import MetaTracker 
 import gc
 
 

@@ -15,7 +15,7 @@ from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier,
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
-import gc  # Для принудительной очистки памяти
+import gc 
 import psutil
 from joblib import parallel_backend
 
