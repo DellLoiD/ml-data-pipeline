@@ -10,7 +10,7 @@ psutil
 category-encoders>=2.6.0
 imbalanced-learn>=0.10.0  # для SMOTE, RandomUnderSampler, NearMiss и др.
 scipy>=1.10.0             # часто требуется для sklearn
-
+optuna
 # === Визуализация ===
 matplotlib>=3.7.0
 seaborn>=0.12.0

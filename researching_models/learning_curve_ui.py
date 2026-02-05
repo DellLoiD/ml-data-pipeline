@@ -19,7 +19,6 @@ import gc
 import psutil  
 from joblib import parallel_backend  
 
-
 class HelpDialog(QDialog):
     """Модальное окно с пояснением метрик или параметров"""
     def __init__(self, title, text, parent=None):
@@ -37,8 +36,6 @@ class HelpDialog(QDialog):
         text_label.setWordWrap(True)
         layout.addWidget(text_label)
         self.setLayout(layout)
-
-
 class LearningCurveUI(QWidget):
     def __init__(self):
         super().__init__()
@@ -532,7 +529,7 @@ class LearningCurveUI(QWidget):
                 row3.addWidget(btn3)
                 model_layout.addLayout(row3)
 
-                # 🔺 Параметры модели
+                # 🔺 Параметры модел��
                 param_text = "<br>".join([f"{k}: {v.text().strip()}" for k, v in params.items()])
                 params_label = QLabel(f"<small><b>Параметры:</b><br>{param_text}</small>")
                 params_label.setWordWrap(True)
