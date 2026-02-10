@@ -13,9 +13,7 @@ logging.basicConfig(
     ]
 )
 
-from PySide6.QtWidgets import (
-    QApplication, QWidget, QPushButton, QVBoxLayout, QGroupBox
-)
+from PySide6.QtWidgets import ( QApplication, QWidget, QPushButton, QVBoxLayout, QGroupBox)
 
 # === Импорт всех модулей ===
 from preprocessing.dataset_processing_check_nan import MissingValuesDialog
@@ -24,10 +22,8 @@ from preprocessing.correlation_graph_ui import CorrelationGraphUI
 from preprocessing.data_balancing.data_balancing_method_ui import DataBalancingApp
 from researching_models.model_evaluation_ui import ModelEvaluationUI
 from researching_models.feature_importance_ui import FeatureImportanceUI
-from researching_models.learning_curve_optuna_ui import LearningCurveUI
-#from researching_models.learning_curve_ui import LearningCurveUI
-#from researching_models.cross_validation_ui import CrossValidationUI 
-from researching_models.cross_validation_optuna_ui import CrossValidationUI
+from researching_models.learning_curve.learning_curve_main_ui import LearningCurveMainUI
+from researching_models.cross_validation.cross_validation_main_ui import CrossValidationMainUI
 from selection_of_parameters.selection_parameters_main_menu_ui import MainWindow_selection_parameters
 from inference_models.inference_trained_models import SurveyForm
 from splitting_dataset_ui import SplittingDatasetWindow
@@ -232,7 +228,7 @@ class TrainingWindow(QWidget):
     def open_learning_curve(self):
         global learning_curve_instance
         if not learning_curve_instance or not learning_curve_instance.isVisible():
-            learning_curve_instance = LearningCurveUI()
+            learning_curve_instance = LearningCurveMainUI()
             learning_curve_instance.show()
         else:
             learning_curve_instance.raise_()
@@ -241,7 +237,7 @@ class TrainingWindow(QWidget):
     def open_cross_validation(self):
         global cross_validation_instance
         if not cross_validation_instance or not cross_validation_instance.isVisible():
-            cross_validation_instance = CrossValidationUI()
+            cross_validation_instance = CrossValidationMainUI()
             cross_validation_instance.show()
         else:
             cross_validation_instance.raise_()

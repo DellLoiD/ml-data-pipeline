@@ -1,17 +1,32 @@
-# researching_models/learning_curve_logic.py
+# researching_models/cross_validation/cross_validation_optuna_logic.py
 import pandas as pd
 import numpy as np
+from sklearn.model_selection import KFold, StratifiedKFold
 from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.model_selection import train_test_split, learning_curve, cross_val_score
+from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor, GradientBoostingClassifier, GradientBoostingRegressor
-from sklearn.metrics import make_scorer, roc_auc_score
+from sklearn.metrics import make_scorer, roc_auc_score, f1_score, precision_score, recall_score
 from joblib import parallel_backend
 import optuna
 import warnings
+import logging
 warnings.filterwarnings("ignore", category=UserWarning)
 
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('parameter_tuning.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
-class ModelAnalyzer:
+# Логирование запуска анализа
+logger.info(f"Запуск анализа Optuna и кросс-валидации...")
+
+class OptunaAnalyzer:
     def __init__(self):
         self.X_train = None
         self.y_train = None
@@ -78,17 +93,29 @@ class ModelAnalyzer:
 
         n_classes = len(np.unique(self.y_train))
 
-        if scoring_name != 'roc_auc':
-            return scoring_name
-
-        if n_classes == 2:
-            return 'roc_auc'  
-        else:
-            return make_scorer(roc_auc_score, multi_class='ovr', response_method='predict_proba')
+        if scoring_name in ['f1', 'precision', 'recall']:
+            if n_classes == 2:
+                return scoring_name  # Для бинарной классификации используется стандартное поведение
+            else:
+                # Для многоклассовой задачи используем стратегию 'macro'
+                if scoring_name == 'f1':
+                    return make_scorer(f1_score, average='macro')
+                elif scoring_name == 'precision':
+                    return make_scorer(precision_score, average='macro')
+                elif scoring_name == 'recall':
+                    return make_scorer(recall_score, average='macro')
+        
+        if scoring_name == 'roc_auc':
+            if n_classes == 2:
+                return 'roc_auc'
+            else:
+                return make_scorer(roc_auc_score, multi_class='ovr', response_method='predict_proba')
+                
+        return scoring_name
 
     def run_optuna_study(self, model_name, optuna_n_jobs, n_trials, timeout, direction, scoring,
                         n_est_range, max_depth_range, learning_rate_range,
-                        cv, n_jobs_cv, random_state, storage_path="sqlite:///optuna_study.db"):
+                        cv, n_jobs_cv, random_state, storage_path=None):  
         """Запуск Optuna для подбора гиперпараметров"""
         if self.X_train is None:
             raise ValueError("Данные не загружены")
@@ -96,10 +123,12 @@ class ModelAnalyzer:
         # Используем внешнее хранилище (SQLite) для Optuna
         study = optuna.create_study(
             storage=storage_path,
-            study_name="learning_curve_optimization",
+            study_name="cross_validation_optimization",
             direction=direction,
-            load_if_exists=True  # Если эксперимент уже был, продолжим
+            load_if_exists=True  
         )
+
+        logger.info(f"Запуск Optuna study для {model_name}, n_trials={n_trials}, timeout={timeout}")
 
         def objective(trial):
             try:
@@ -121,42 +150,41 @@ class ModelAnalyzer:
                 else:
                     raise ValueError(f"Модель {model_name} не поддерживается")
 
+
                 X_train_scaled = self.scaler.fit_transform(self.X_train)
                 scorer = self.get_scorer(scoring)
                 scores = cross_val_score(clf, X_train_scaled, self.y_train, cv=cv, scoring=scorer, n_jobs=n_jobs_cv)
                 return np.mean(scores)
             except Exception as e:
-                print(f"[DEBUG] Ошибка в trial: {e}")
+                logger.error(f"[DEBUG] Ошибка в trial: {e}")
                 return -np.inf if direction == "maximize" else np.inf
 
         study.optimize(objective, n_trials=n_trials, timeout=timeout, n_jobs=optuna_n_jobs)  
+        logger.info(f"Optuna study завершен. Лучшие параметры: {study.best_params}, лучшая метрика: {study.best_value:.4f}")
         return study
 
-    def compute_learning_curve(self, best_model, scoring, cv, n_points, n_jobs_cv, random_state):
-        """Вычисление кривой обучения"""
+    def compute_cross_validation_scores(self, best_model, scoring, cv, n_jobs_cv, random_state):
+        """Вычисление метрик кросс-валидации и сохранение оценок для каждого фолда"""
         X_train_scaled = self.scaler.fit_transform(self.X_train)
-        X_test_scaled = self.scaler.transform(self.X_test)
+
+        # Определяем стратегию разбиения с random_state для воспроизводимости
+        if self.task_type == "classification":
+            cv_strategy = StratifiedKFold(n_splits=cv, shuffle=True, random_state=random_state)
+        else:
+            cv_strategy = KFold(n_splits=cv, shuffle=True, random_state=random_state)
 
         with parallel_backend('loky', n_jobs=n_jobs_cv):
-            train_sizes, train_scores, val_scores = learning_curve(
+            scores = cross_val_score(
                 best_model, X_train_scaled, self.y_train,
-                train_sizes=np.linspace(0.1, 1.0, n_points),
-                cv=cv, scoring=self.get_scorer(scoring), n_jobs=n_jobs_cv, random_state=random_state
+                cv=cv_strategy, scoring=self.get_scorer(scoring), n_jobs=n_jobs_cv
             )
-
-        train_mean = np.mean(train_scores, axis=1)
-        val_mean = np.mean(val_scores, axis=1)
-        final_val = val_mean[-1]
-        gap = train_mean[-1] - final_val
-
-        best_model.fit(X_train_scaled, self.y_train)
-        final_test = best_model.score(X_test_scaled, self.y_test)
+        mean_score = np.mean(scores)
+        std_score = np.std(scores)
+        
+        logger.info(f"Кросс-валидация завершена. Средняя метрика: {mean_score:.4f} ± {std_score:.4f}")
 
         return {
-            'train_sizes': train_sizes,
-            'train_mean': train_mean,
-            'val_mean': val_mean,
-            'final_val': final_val,
-            'gap': gap,
-            'final_test': final_test
+            'mean_score': mean_score,
+            'std_score': std_score,
+            'scores': scores
         }
