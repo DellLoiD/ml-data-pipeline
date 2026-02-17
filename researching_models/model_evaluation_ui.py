@@ -55,9 +55,16 @@ class ModelEvaluationUI(QWidget):
         self.select_dataset_btn.setEnabled(False)
         main_layout.addWidget(self.select_dataset_btn)
 
+        # Переместили метку целевой переменной и памяти сюда, сразу после строки выбора датасета
+        target_memory_layout = QHBoxLayout()
         self.target_label = QLabel("Целевая переменная: не выбрана")
         self.target_label.setStyleSheet("font-weight: bold;")
-        main_layout.addWidget(self.target_label)
+        self.memory_label = QLabel("📊 Память: ? МБ")
+        self.memory_label.setStyleSheet("color: #555; font-size: 11px;")
+        target_memory_layout.addWidget(self.target_label)
+        target_memory_layout.addWidget(self.memory_label)
+        target_memory_layout.addStretch() 
+        main_layout.addLayout(target_memory_layout)
 
         models_group = QGroupBox("Модели для оценки")
         models_layout = QVBoxLayout()

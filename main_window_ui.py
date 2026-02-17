@@ -21,7 +21,11 @@ from preprocessing.dataset_processing_fix_non_numeric_ui import FixNonNumericWin
 from preprocessing.correlation_graph_ui import CorrelationGraphUI
 from preprocessing.data_balancing.data_balancing_method_ui import DataBalancingApp
 from researching_models.model_evaluation_ui import ModelEvaluationUI
-from researching_models.feature_importance_ui import FeatureImportanceUI
+
+from researching_models.feature_importance.feature_importance__main_train_model_ui import FeatureImportanceUI
+#from researching_models.feature_importance_ui import FeatureImportanceUI
+
+
 from researching_models.learning_curve.learning_curve_main_ui import LearningCurveMainUI
 from researching_models.cross_validation.cross_validation_main_ui import CrossValidationMainUI
 from selection_of_parameters.selection_parameters_main_menu_ui import MainWindow_selection_parameters
@@ -220,6 +224,7 @@ class TrainingWindow(QWidget):
         global feature_importance_instance
         if not feature_importance_instance or not feature_importance_instance.isVisible():
             feature_importance_instance = FeatureImportanceUI()
+            #feature_importance_instance = FeatureImportanceUI()
             feature_importance_instance.show()
         else:
             feature_importance_instance.raise_()

@@ -250,11 +250,6 @@ class LearningCurveOptunaTab(QWidget):
         for radio in [self.r2_radio, self.neg_mse_radio, self.neg_mae_radio]:
             radio.setVisible(not is_classification)
 
-    def update_models(self):
-        # Функция оставлена пустой, так как в текущей реализации она больше не требуется.
-        # Ранее она использовалась для обновления списка моделей при смене типа задачи, но теперь это не нужно.
-        pass
-
     def on_model_selected_from_main(self, model_name):
         """Вызывается из основного окна при смене модели"""
         self.model_combo.setCurrentText(model_name)

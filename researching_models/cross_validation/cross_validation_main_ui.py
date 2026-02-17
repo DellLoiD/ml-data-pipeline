@@ -77,7 +77,8 @@ class CrossValidationMainUI(QWidget):
         task_load_layout.setStretch(1, 1)
 
         main_layout.addLayout(task_load_layout)
-        # Целевая переменная и метка памяти в одной строке
+
+        # Переместили метку целевой переменной и памяти сюда, сразу после строки задачи и загрузки
         target_memory_layout = QHBoxLayout()
         self.target_label = QLabel("Целевая переменная: не выбрана")
         self.target_label.setStyleSheet("font-weight: bold;")
