@@ -145,63 +145,96 @@ class FeatureImportanceUI(QWidget):
         title_label.setFont(QFont("Arial", 14, QFont.Bold))
         main_layout.addWidget(title_label)
 
-        task_layout = QHBoxLayout()
-        task_layout.addWidget(QLabel("Задача:"))
+        # Создаём единый горизонтальный макет
+        main_horizontal_layout = QHBoxLayout()
+
+        # --- Левая часть: задача и кнопки ---
+        main_horizontal_layout.addWidget(QLabel("Задача:"))
+
         self.classification_radio = QRadioButton("Классификация")
         self.regression_radio = QRadioButton("Регрессия")
         self.classification_radio.setChecked(True)
         self.regression_radio.setChecked(False)
+
         self.task_group = QButtonGroup()
         self.task_group.addButton(self.classification_radio, 1)
         self.task_group.addButton(self.regression_radio, 2)
         self.task_group.buttonClicked.connect(self.on_task_selected)
-        task_layout.addWidget(self.classification_radio)
-        task_layout.addWidget(self.regression_radio)
-        task_layout.addStretch()
-        main_layout.addLayout(task_layout)
+
+        main_horizontal_layout.addWidget(self.classification_radio)
+        main_horizontal_layout.addWidget(self.regression_radio)
 
         self.load_btn = QPushButton("Загрузить датасет")
         self.load_btn.clicked.connect(self.load_dataset)
-        main_layout.addWidget(self.load_btn)
+        main_horizontal_layout.addWidget(self.load_btn)
+
+        self.delete_columns_btn = QPushButton("🗑️ Удалить колонки")
+        self.delete_columns_btn.clicked.connect(self.delete_selected_columns)
+        self.delete_columns_btn.setEnabled(False)
+        main_horizontal_layout.addWidget(self.delete_columns_btn)
+
+        self.save_btn = QPushButton("💾 Сохранить датасет")
+        self.save_btn.clicked.connect(self.save_dataset)
+        self.save_btn.setEnabled(False)
+        main_horizontal_layout.addWidget(self.save_btn)
+
+        # --- Центр: глобальные параметры ---
+        main_horizontal_layout.addWidget(QLabel("R.S.: "))
+        self.global_random_state = QLineEdit("42")
+        self.global_random_state.setFixedWidth(20)
+        main_horizontal_layout.addWidget(self.global_random_state)
+        
+        # Кнопки помощи
+        help_random = QPushButton("?")
+        help_random.setFixedSize(20, 20)
+        help_random.clicked.connect(lambda: HelpDialog(
+            "Random State",
+            "Фиксация случайности. Для воспроизводимости результатов",
+            self
+        ).exec_())
+        main_horizontal_layout.addWidget(help_random)
+
+        main_horizontal_layout.addWidget(QLabel("n_jobs: "))
+        self.global_n_jobs = QLineEdit("1")
+        self.global_n_jobs.setFixedWidth(20)
+        main_horizontal_layout.addWidget(self.global_n_jobs) 
+
+        help_njobs = QPushButton("?")
+        help_njobs.setFixedSize(20, 20)
+        help_njobs.clicked.connect(lambda: HelpDialog(
+            "n_jobs",
+            "Количество ядер CPU для параллельных вычислений.\n"
+            "1 — последовательно (по умолчанию)\n"
+            "-1 — использовать все ядра",
+            self
+        ).exec_())
+        main_horizontal_layout.addWidget(help_njobs)
+
+        # Растяжка в конце
+        main_horizontal_layout.addStretch()
+
+        # Добавляем единый макет в основной вертикальный макет
+        main_layout.addLayout(main_horizontal_layout)
 
         self.target_label = QLabel("Целевая переменная: не выбрана")
         self.target_label.setStyleSheet("font-weight: bold;")
         main_layout.addWidget(self.target_label)
-
+        
         # 🔺 МЕТКА ДЛЯ ОТОБРАЖЕНИЯ ПАМЯТИ
         self.memory_label = QLabel("📊 Память: ? МБ")
         self.memory_label.setStyleSheet("color: #555; font-size: 11px;")
         main_layout.addWidget(self.memory_label)
 
-        btn_layout = QHBoxLayout()
-
-        self.delete_columns_btn = QPushButton("🗑️ Удалить колонки")
-        self.delete_columns_btn.clicked.connect(self.delete_selected_columns)
-        self.delete_columns_btn.setEnabled(False)
-        btn_layout.addWidget(self.delete_columns_btn)
-
-        self.save_btn = QPushButton("💾 Сохранить датасет")
-        self.save_btn.clicked.connect(self.save_dataset)
-        self.save_btn.setEnabled(False)
-        btn_layout.addWidget(self.save_btn)
-
-        main_layout.addLayout(btn_layout)
-
-        models_group = QGroupBox("Модели для анализа")
-        models_layout = QVBoxLayout()
-
+        # === Модели (без внешней группировки) ===
         self.classification_box = QGroupBox("Классификация")
-        self.classification_layout = QVBoxLayout()
+        self.classification_layout = QGridLayout()
         self.classification_box.setLayout(self.classification_layout)
-        models_layout.addWidget(self.classification_box)
+        main_layout.addWidget(self.classification_box)
 
         self.regression_box = QGroupBox("Регрессия")
-        self.regression_layout = QVBoxLayout()
+        self.regression_layout = QGridLayout()
         self.regression_box.setLayout(self.regression_layout)
-        models_layout.addWidget(self.regression_box)
-
-        models_group.setLayout(models_layout)
-        main_layout.addWidget(models_group)
+        main_layout.addWidget(self.regression_box)
         
         # === SHAP Analysis Section ===
         # SHAP UI is now integrated below
@@ -323,13 +356,13 @@ class FeatureImportanceUI(QWidget):
 
     def create_models(self):
         clf_models = {
-            'Random Forest Classification': ['Кол-во деревьев', 'Max Depth', 'Min Samples Split', 'Random State'],
-            'Gradient Boosting Classification': ['Кол-во деревьев', 'Learning Rate', 'Max Depth', 'Random State'],
-            'Logistic Regression Classification': ['C', 'Max Iterations', 'Penalty', 'Random State']
+            'Random Forest': ['Кол-во деревьев', 'Max Depth', 'Min Samples Split', 'Random State'],
+            'Gradient Boosting': ['Кол-во деревьев', 'Learning Rate', 'Max Depth', 'Random State'],
+            'Logistic Regression': ['C', 'Max Iterations', 'Penalty', 'Random State']
         }
         reg_models = {
-            'Random Forest Regression': ['Кол-во деревьев', 'Max Depth', 'Min Samples Split', 'Random State'],
-            'Gradient Boosting Regression': ['Кол-во деревьев', 'Learning Rate', 'Max Depth', 'Random State']
+            'Random Forest': ['Кол-во деревьев', 'Max Depth', 'Min Samples Split', 'Random State'],
+            'Gradient Boosting': ['Кол-во деревьев', 'Learning Rate', 'Max Depth', 'Random State']
         }
         defaults = {
             'Кол-во деревьев': '100',
@@ -346,61 +379,68 @@ class FeatureImportanceUI(QWidget):
             self._add_model_to_layout(model_name, params, defaults, self.classification_layout)
         for model_name, params in reg_models.items():
             self._add_model_to_layout(model_name, params, defaults, self.regression_layout)
-
+            
     def _add_model_to_layout(self, model_name, params, defaults, layout):
-        hbox = QHBoxLayout()
-        cb = QCheckBox(model_name)
-        self.checkboxes.append(cb)
-        hbox.addWidget(cb)
+        # Основной layout для модели — горизонтальный
+        group_box = QGroupBox("")
+        group_layout = QHBoxLayout()
+        group_box.setLayout(group_layout)
+        group_layout.setContentsMargins(10, 4, 10, 4)
+
+        # Чекбокс для выбора модели
+        model_checkbox = QCheckBox("")
+        model_checkbox.setChecked(False)
+        model_checkbox.setFixedWidth(25)
+        # Добавляем имя модели как свойство
+        model_checkbox.setProperty("model_name", model_name)
+        group_layout.addWidget(model_checkbox)
+
+        # Название модели как QLabel
+        model_label = QLabel(model_name)
+        model_label.setFixedWidth(110)
+        group_layout.addWidget(model_label)
+
+        # Контейнер для параметров модели
         lines = {}
-
         for param in params:
-            lbl = QLabel(param)
-            le = QLineEdit()
-            le.setFixedWidth(80)
-            le.setText(defaults.get(param, "0"))
+            if param not in ['Random State', 'n_jobs']:
+                # Виджет для одного параметра
+                param_widget = QWidget()
+                param_hbox = QHBoxLayout(param_widget)
+                param_hbox.setContentsMargins(3, 1, 3, 1)
 
-            help_text = {
-                'Кол-во деревьев': "Число деревьев в ансамбле. Больше → точнее, но дольше",
-                'Max Depth': "Максимальная глубина дерева. None — без ограничений. Большое → переобучение",
-                'Min Samples Split': "Минимальное число объектов для разбиения узла. Больше → проще модель",
-                'Learning Rate': "Скорость обучения в GB. Меньше → стабильнее, но медленнее",
-                'C': "Сила регуляризации в Logistic Regression. Больше → слабее регуляризация",
-                'Max Iterations': "Максимальное число итераций обучения. Увеличьте, если модель не сходится",
-                'Penalty': "Тип регуляризации: l1, l2, none",
-                'Random State': "Фиксация случайности. Для воспроизводимости"
-            }.get(param, param)
+                lbl = QLabel(param)
+                lbl.setFixedWidth(100)
+                le = QLineEdit()
+                le.setFixedWidth(60)
+                le.setText(defaults.get(param, "0"))
 
-            btn = QPushButton("?")
-            btn.setFixedSize(20, 20)
-            btn.clicked.connect(lambda ch, t=param, h=help_text: HelpDialog(t, h, self).exec_())
+                help_text = {
+                    'Кол-во деревьев': "Число деревьев в ансамбле. Больше → точнее, но дольше",
+                    'Max Depth': "Максимальная глубина дерева. None — без ограничений. Большое → переобучение",
+                    'Min Samples Split': "Минимальное число объектов для разбиения узла. Больше → проще модель",
+                    'Learning Rate': "Скорость обучения в GB. Меньше → стабильнее, но медленнее",
+                    'C': "Сила регуляризации в Logistic Regression. Больше → слабее регуляризация",
+                    'Max Iterations': "Максимальное число итераций обучения. Увеличьте, если модель не сходится",
+                    'Penalty': "Тип регуляризации: l1, l2, none",
+                    'Random State': "Фиксация случайности. Для воспроизводимости"
+                }.get(param, param)
 
-            hbox.addWidget(lbl)
-            hbox.addWidget(le)
-            hbox.addWidget(btn)
-            lines[param] = le
+                btn = QPushButton("?")
+                btn.setFixedSize(20, 20)
+                btn.clicked.connect(lambda ch, t=param, h=help_text: HelpDialog(t, h, self).exec_())
 
-        # 🔧 Добавляем n_jobs (по умолчанию = 1)
-        n_jobs_lbl = QLabel("n_jobs")
-        n_jobs_le = QLineEdit("1")
-        n_jobs_le.setFixedWidth(50)
-        n_jobs_help = QPushButton("?")
-        n_jobs_help.setFixedSize(20, 20)
-        n_jobs_help.clicked.connect(lambda: HelpDialog(
-            "n_jobs",
-            "Количество ядер CPU для параллельных вычислений.\n"
-            "1 — последовательно (по умолчанию)\n"
-            "-1 — использовать все ядра",
-            self
-        ).exec_())
-        hbox.addWidget(n_jobs_lbl)
-        hbox.addWidget(n_jobs_le)
-        hbox.addWidget(n_jobs_help)
-        lines['n_jobs'] = n_jobs_le
+                param_hbox.addWidget(lbl)
+                param_hbox.addWidget(le)
+                param_hbox.addWidget(btn)
 
+                group_layout.addWidget(param_widget)
+                lines[param] = le
+
+        # Сохраняем ссылку
         self.labels_and_lines[model_name] = lines
-        hbox.addStretch()
-        layout.addLayout(hbox)
+        self.checkboxes.append(model_checkbox)
+        layout.addWidget(group_box)
 
     def load_dataset(self):
         path, _ = QFileDialog.getOpenFileName(self, "Выберите CSV", "./dataset/", "CSV (*.csv)")
@@ -474,7 +514,7 @@ class FeatureImportanceUI(QWidget):
             try:
                 params = self.labels_and_lines.get(model_name, {})
                 clf = self._create_model(model_name, params)
-                with parallel_backend('loky', n_jobs=self.safe_int(params, 'n_jobs', 1)):
+                with parallel_backend('loky', n_jobs=self.safe_int({'n_jobs': self.global_n_jobs}, 'n_jobs', 1)):
                     clf.fit(X_scaled, self.y_train)
                 importances = self._get_importances(clf)
                 for idx, col in enumerate(feature_names):
@@ -525,25 +565,43 @@ class FeatureImportanceUI(QWidget):
     def _create_model(self, name, params):
         random_state = self.safe_int(params, 'Random State', 42)
         n_estimators = self.safe_int(params, 'Кол-во деревьев', 100)
-        if 'Random Forest Classification' in name:
+        # Используем глобальные параметры
+        random_state = self.safe_int({'Random State': self.global_random_state}, 'Random State', 42)
+        n_jobs = self.safe_int({'n_jobs': self.global_n_jobs}, 'n_jobs', 1)
+        
+        if name == 'Random Forest':
             max_depth = self.safe_int_or_none(params, 'Max Depth', None)
             min_samples_split = self.safe_int(params, 'Min Samples Split', 2)
-            return RandomForestClassifier(
-                n_estimators=n_estimators,
-                max_depth=max_depth,
-                min_samples_split=min_samples_split,
-                random_state=random_state)
-            
-        elif 'Gradient Boosting Classification' in name:
+            if self.task_type == "classification":
+                return RandomForestClassifier(
+                    n_estimators=n_estimators,
+                    max_depth=max_depth,
+                    min_samples_split=min_samples_split,
+                    random_state=random_state)
+            else:
+                return RandomForestRegressor(
+                    n_estimators=n_estimators,
+                    max_depth=max_depth,
+                    min_samples_split=min_samples_split,
+                    random_state=random_state)
+        
+        elif name == 'Gradient Boosting':
             max_depth = self.safe_int_or_none(params, 'Max Depth', 3)
             learning_rate = self.safe_float(params, 'Learning Rate', 0.1)
-            return GradientBoostingClassifier(
-                n_estimators=n_estimators,
-                learning_rate=learning_rate,
-                max_depth=max_depth,
-                random_state=random_state)
-            
-        elif 'Logistic Regression Classification' in name:
+            if self.task_type == "classification":
+                return GradientBoostingClassifier(
+                    n_estimators=n_estimators,
+                    learning_rate=learning_rate,
+                    max_depth=max_depth,
+                    random_state=random_state)
+            else:
+                return GradientBoostingRegressor(
+                    n_estimators=n_estimators,
+                    learning_rate=learning_rate,
+                    max_depth=max_depth,
+                    random_state=random_state)
+        
+        elif name == 'Logistic Regression':
             C = self.safe_float(params, 'C', 1.0)
             max_iter = self.safe_int(params, 'Max Iterations', 100)
             penalty = params.get('Penalty', None)
@@ -551,14 +609,6 @@ class FeatureImportanceUI(QWidget):
             penalty = penalty if penalty in ['l1', 'l2', 'none'] else 'l2'
             solver = 'liblinear' if penalty in ['l1', 'l2'] else 'saga'
             return LogisticRegression(C=C, max_iter=max_iter, penalty=penalty, solver=solver, random_state=random_state)
-        elif 'Random Forest Regression' in name:
-            max_depth = self.safe_int_or_none(params, 'Max Depth', None)
-            min_samples_split = self.safe_int(params, 'Min Samples Split', 2)
-            return RandomForestRegressor(
-                n_estimators=n_estimators,
-                max_depth=max_depth,
-                min_samples_split=min_samples_split,
-                random_state=random_state)
 
     def train_selected_model(self):
         """Обучает выбранную модель и передает её в SHAP UI"""
@@ -566,7 +616,7 @@ class FeatureImportanceUI(QWidget):
             QMessageBox.warning(self, "Ошибка", "Сначала загрузите датасет.")
             return
 
-        selected = [cb.text() for cb in self.checkboxes if cb.isChecked()]
+        selected = [cb.property("model_name") for cb in self.checkboxes if cb.isChecked()]
         if not selected:
             QMessageBox.warning(self, "Ошибка", "Выберите хотя бы одну модель.")
             return
@@ -581,10 +631,14 @@ class FeatureImportanceUI(QWidget):
         try:
             # Создание и обучение модели
             model = self._create_model(model_name, params)
+            if model is None:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось создать модель: неизвестное имя '{model_name}'")
+                return
+
             X_scaled = StandardScaler().fit_transform(self.X_train)
             
             # Обучение модели
-            with parallel_backend('loky', n_jobs=self.safe_int(params, 'n_jobs', 1)):
+            with parallel_backend('loky', n_jobs=self.safe_int({'n_jobs': self.global_n_jobs}, 'n_jobs', 1)):
                 model.fit(X_scaled, self.y_train)
             
             # Передача данных и модели в SHAP UI
@@ -597,6 +651,8 @@ class FeatureImportanceUI(QWidget):
                 QMessageBox.critical(self, "Ошибка", "Не удалось передать модель в SHAP.")
                 
         except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Ошибка при обучении модели {model_name}:\n{e}")
+            error_msg = f"Ошибка при обучении модели {model_name}: {e}"
+            QMessageBox.critical(self, "Ошибка", error_msg)
+            print(error_msg)
         
         self.update_memory_usage()

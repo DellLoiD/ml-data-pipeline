@@ -100,8 +100,10 @@ class FeatureImportanceSHAPUI(QWidget):
 
         title_label = QLabel("Анализ SHAP")
         title_label.setFont(QFont("Arial", 14, QFont.Bold))
-        self.main_layout.addWidget(title_label)
-
+        # Создаем горизонтальный контейнер для заголовка и "Тип анализа"
+        header_analysis_layout = QHBoxLayout()
+        header_analysis_layout.addWidget(title_label)
+        
         # Тип анализа
         analysis_type_group = QGroupBox("Тип анализа")
         analysis_type_layout = QHBoxLayout()
@@ -116,12 +118,15 @@ class FeatureImportanceSHAPUI(QWidget):
 
         analysis_type_layout.addWidget(self.global_analysis_radio)
         analysis_type_layout.addWidget(self.local_analysis_radio)
-        analysis_type_layout.addWidget(QLabel("номер объекта"))
+        analysis_type_layout.addWidget(QLabel("№ объекта"))
         analysis_type_layout.addWidget(self.instance_num_le)
         analysis_type_layout.addStretch()
         
         analysis_type_group.setLayout(analysis_type_layout)
-        self.main_layout.addWidget(analysis_type_group)
+        header_analysis_layout.addWidget(analysis_type_group)
+        header_analysis_layout.addStretch()
+
+        self.main_layout.addLayout(header_analysis_layout)
 
         # Настройки SHAP
         shap_settings_group = QGroupBox("Настройки")
@@ -129,71 +134,84 @@ class FeatureImportanceSHAPUI(QWidget):
 
         # Метод объяснения
         self.explainer_combo = QComboBox()
-        self.explainer_combo.addItems(["Auto", "TreeExplainer", "KernelExplainer", "LinearExplainer"])
-        self.explainer_combo.setCurrentText("Auto")
-        shap_settings_layout.addWidget(QLabel("Метод:"))
-        shap_settings_layout.addWidget(self.explainer_combo)
-
+        self.explainer_combo.addItems(["Авто", "TreeExplainer", "KernelExplainer", "LinearExplainer"])
+        self.explainer_combo.setCurrentText("Авто")
+        
         # Размер выборки
         self.sample_size_combo = QComboBox()
-        self.sample_size_combo.addItems(["100", "500", "1000", "all"])
-        self.sample_size_combo.setCurrentText("1000")
-        shap_settings_layout.addWidget(QLabel("Размер:"))
-        shap_settings_layout.addWidget(self.sample_size_combo)
-
+        self.sample_size_combo.addItems(["100", "500", "1000", "все"])
+        self.sample_size_combo.setCurrentText("100")
+        
         # Топ-N признаков
         self.top_n_spin = QSpinBox()
         self.top_n_spin.setRange(1, 100)
         self.top_n_spin.setValue(15)
-        shap_settings_layout.addWidget(QLabel("Топ-N:"))
-        shap_settings_layout.addWidget(self.top_n_spin)
+        
+        # Группировка: Метод + Размер
+        method_size_layout = QHBoxLayout()
+        method_size_layout.addWidget(QLabel("Метод:"))
+        method_size_layout.addWidget(self.explainer_combo)
+        method_size_layout.addWidget(QLabel("Размер:"))
+        method_size_layout.addWidget(self.sample_size_combo)
+        
+        # Группировка: Топ-N
+        top_n_layout = QHBoxLayout()
+        top_n_layout.addWidget(QLabel("Топ-N:"))
+        top_n_layout.addWidget(self.top_n_spin)
+
+        # Добавляем сгруппированные макеты в общий layout
+        shap_settings_layout.addLayout(method_size_layout)
+        shap_settings_layout.addLayout(top_n_layout)
 
         shap_settings_group.setLayout(shap_settings_layout)
-        self.main_layout.addWidget(shap_settings_group)
 
         # График
         plot_group = QGroupBox("График")
         plot_layout = QHBoxLayout()
 
+        # Создание комбобоксов
         self.plot_type_combo = QComboBox()
-        self.plot_type_combo.addItems(["Summary Plot", "Bar", "Beeswarm"])
-        plot_layout.addWidget(QLabel("Тип:"))
-        plot_layout.addWidget(self.plot_type_combo)
-
+        self.plot_type_combo.addItems(["Сводный график", "Столбчатый", "Пчелиное гнездо"])
         self.sort_combo = QComboBox()
-        self.sort_combo.addItems(["Descending", "Alphabetical", "Original Order"])
-        plot_layout.addWidget(QLabel("Сортировка:"))
-        plot_layout.addWidget(self.sort_combo)
+        self.sort_combo.addItems(["По убыванию", "По алфавиту", "По исходному порядку"])
 
+        # Кнопка помощи
         self.help_plot_btn = QPushButton("?")
+        self.help_plot_btn.setFixedSize(20, 20)
         self.help_plot_btn.clicked.connect(self.show_plot_help)
-        plot_layout.addWidget(self.help_plot_btn)
 
+        # Комбинированный виджет для Тип и Сортировка
+        combined_layout = QVBoxLayout()
+        type_sort_layout = QHBoxLayout()
+        type_sort_layout.addWidget(QLabel("Тип:"))
+        type_sort_layout.addWidget(self.plot_type_combo)
+        type_sort_layout.addWidget(QLabel("Сортировка:"))
+        type_sort_layout.addWidget(self.sort_combo)
+        type_sort_layout.addWidget(self.help_plot_btn)
+        type_sort_layout.addStretch()
+        
+        combined_layout.addLayout(type_sort_layout)
+        plot_layout.addLayout(combined_layout)
         plot_group.setLayout(plot_layout)
-        self.main_layout.addWidget(plot_group)
 
-        # Кнопки управления
-        action_layout = QHBoxLayout()
-        self.analyze_btn = QPushButton("Анализировать")
-        self.analyze_btn.clicked.connect(self.analyze_shap)
-        self.analyze_btn.setEnabled(False)
-
-        self.save_shap_btn = QPushButton("Сохранить SHAP-значения")
-        self.save_shap_btn.clicked.connect(self.save_shap_values)
-        self.save_shap_btn.setEnabled(False)
-
-        self.save_plot_btn = QPushButton("Сохранить график")
-        self.save_plot_btn.clicked.connect(self.save_shap_plot)
-        self.save_plot_btn.setEnabled(False)
-
-        action_layout.addStretch()
-        action_layout.addWidget(self.analyze_btn)
-        action_layout.addWidget(self.save_shap_btn)
-        action_layout.addWidget(self.save_plot_btn)
-        self.main_layout.addLayout(action_layout)
+        # Создаем горизонтальный контейнер для Настроек и Графика
+        settings_plot_layout = QHBoxLayout()
+        settings_plot_layout.addWidget(shap_settings_group)
+        settings_plot_layout.addWidget(plot_group)
+        
+        # Добавляем контейнер в основной макет
+        self.main_layout.addLayout(settings_plot_layout)
 
         # Результаты
         results_group = QGroupBox("📊 Результаты важности признаков")
+
+        # Кнопка анализа перемещена ниже настроек и над результатами
+        self.analyze_btn = QPushButton("Анализировать")
+        self.analyze_btn.clicked.connect(self.analyze_shap)
+        self.analyze_btn.setEnabled(False)
+        self.main_layout.addWidget(self.analyze_btn)
+
+        # Результаты (продолжение)
         results_layout = QVBoxLayout()
 
         help_label = QLabel(
@@ -244,13 +262,13 @@ class FeatureImportanceSHAPUI(QWidget):
         model_trained = len(self.trained_models) > 0
 
         self.analyze_btn.setEnabled(model_trained)
-        self.save_shap_btn.setEnabled(self.shap_values is not None)
-        self.save_plot_btn.setEnabled(self.shap_values is not None)
+        # Кнопки управления убраны, так как их функциональность перенесена в виджеты графиков
+        # Кнопки save_shap_btn и save_plot_btn больше не существуют, проверка не нужна
 
-    def save_shap_plot(self):
-        """Сохраняет текущий график SHAP как изображение."""
-        if self.shap_values is None:
-            QMessageBox.warning(self, "Ошибка", "Нет графика для сохранения.")
+    def save_shap_plot_for_plot(self, plot_data):
+        """Сохраняет график SHAP на основе кэшированных данных."""
+        if plot_data is None or 'shap_values' not in plot_data:
+            QMessageBox.warning(self, "Ошибка", "Нет данных графика для сохранения.")
             return
 
         path, _ = QFileDialog.getSaveFileName(
@@ -260,7 +278,26 @@ class FeatureImportanceSHAPUI(QWidget):
             return
 
         try:
-            # Например, сохранение последнего построенного графика через matplotlib
+            # Перестраиваем график заново из кэшированных данных
+            plt.figure(figsize=(10, 6))
+            ax = plt.gca()
+            
+            shap_values = plot_data['shap_values']
+            X_sample = plot_data['X_sample']
+            plot_type = plot_data['plot_type']
+            features_display_names = plot_data['features_display_names']
+
+            if plot_type == "Сводный график":
+                if isinstance(shap_values, list):
+                    shap.summary_plot(shap_values, X_sample, feature_names=features_display_names, plot_type="bar", show=False)
+                else:
+                    shap.summary_plot(shap_values, X_sample, feature_names=features_display_names, plot_type="dot", show=False)
+            elif plot_type == "Столбчатый":
+                shap.summary_plot(shap_values, features=X_sample, feature_names=features_display_names, plot_type="bar", show=False)
+            elif plot_type == "Пчелиное гнездо":
+                shap.plots.beeswarm(shap_values, features=X_sample, feature_names=features_display_names, show=False)
+            
+            plt.title(f"{plot_type} - {plot_data['sort_order']}")
             plt.tight_layout()
             plt.savefig(path, bbox_inches='tight', dpi=300)
             plt.close()
@@ -270,10 +307,10 @@ class FeatureImportanceSHAPUI(QWidget):
             QMessageBox.critical(self, "Ошибка", error_msg)
             print(error_msg)
 
-    def save_shap_values(self):
-        """Сохраняет SHAP значения в файл .npy или .csv"""
-        if self.shap_values is None:
-            QMessageBox.warning(self, "Ошибка", "Нет SHAP значений для сохранения.")
+    def save_shap_values_for_plot(self, plot_data):
+        """Сохраняет SHAP значения из кэшированных данных."""
+        if plot_data is None or 'shap_values' not in plot_data:
+            QMessageBox.warning(self, "Ошибка", "Нет данных SHAP для сохранения.")
             return
 
         path, _ = QFileDialog.getSaveFileName(
@@ -283,14 +320,21 @@ class FeatureImportanceSHAPUI(QWidget):
             return
 
         try:
+            shap_values = plot_data['shap_values']
+            feature_names = plot_data['feature_names']
+
             if path.endswith(".npy"):
-                np.save(path, self.shap_values)
+                np.save(path, shap_values)
             elif path.endswith(".csv"):
                 # Преобразуем в DataFrame для CSV
-                shap_df = pd.DataFrame(self.shap_values.values, columns=self.X_train.columns)
+                if isinstance(shap_values, np.ndarray):
+                    values = shap_values
+                else:
+                    values = shap_values.values
+                shap_df = pd.DataFrame(values, columns=feature_names)
                 shap_df.to_csv(path, index=False)
             else:
-                np.save(path, self.shap_values)  # По умолчанию .npy
+                np.save(path, shap_values)  # По умолчанию .npy
 
             QMessageBox.information(self, "Сохранено", f"SHAP значения сохранены:\n{os.path.basename(path)}")
         except Exception as e:
@@ -301,15 +345,15 @@ class FeatureImportanceSHAPUI(QWidget):
     def show_plot_help(self):
         text = """
         <b>Типы графиков:</b><br>
-        • <b>Summary Plot</b> — суммирует важность признаков и направление влияния<br>
-        • <b>Bar</b> — столбчатая диаграмма важности<br>
-        • <b>Beeswarm</b> — распределение вкладов признаков по объектам<br><br>
+        • <b>Сводный график</b> — суммирует важность признаков и направление влияния<br>
+        • <b>Столбчатый</b> — диаграмма важности признаков<br>
+        • <b>Пчелиное гнездо</b> — распределение вкладов признаков по объектам<br><br>
         <b>Сортировка:</b><br>
         • По убыванию — по среднему |SHAP значению|<br>
         • По алфавиту — по имени признака<br>
-        • Исходный порядок — как в датасете
+        • По исходному порядку — как в датасете
         """
-        HelpDialog("Plot Help", text, self).exec_()
+        HelpDialog("Справка по графикам", text, self).exec_()
 
     def _add_model_to_layout(self, model_name, params, defaults, layout):
         hbox = QHBoxLayout()
@@ -322,8 +366,8 @@ class FeatureImportanceSHAPUI(QWidget):
             lbl = QLabel(param)
             if param in ['Fit Intercept', 'Normalize']:
                 le = QComboBox()
-                le.addItems(['True', 'False'])
-                le.setCurrentText(defaults.get(param, "True"))
+                le.addItems(['Истина', 'Ложь'])
+                le.setCurrentText(defaults.get(param, "Истина"))
             else:
                 le = QLineEdit()
                 le.setFixedWidth(80)
@@ -366,14 +410,14 @@ class FeatureImportanceSHAPUI(QWidget):
         kill_child_processes()
         self.update_memory_usage()
         if self.X_train is None or self.y_train is None:
-            QMessageBox.warning(self, "Error", "No data for training.")
+            QMessageBox.warning(self, "Ошибка", "Нет данных для обучения.")
             return
         if not self.target_col:
-            QMessageBox.warning(self, "Error", "Target variable is not selected.")
+            QMessageBox.warning(self, "Ошибка", "Целевая переменная не выбрана.")
             return
         selected = [cb.text() for cb in self.checkboxes if cb.isChecked()]
         if not selected:
-            QMessageBox.warning(self, "Error", "Select at least one model.")
+            QMessageBox.warning(self, "Ошибка", "Выберите хотя бы одну модель.")
             return
         
         from .feature_importance_shap_logic import train_model as logic_train_model
@@ -391,29 +435,31 @@ class FeatureImportanceSHAPUI(QWidget):
                 if result['success']:
                     self.trained_models[model_name] = result['model']
                     self.feature_importances[model_name] = result.get('importances')
-                    QMessageBox.information(self, "Training", f"Model {model_name} trained.")
+                    QMessageBox.information(self, "Обучение", f"Модель {model_name} обучена.")
                 else:
-                    QMessageBox.critical(self, "Error", f"Training error {model_name}: {result['error']}")
+                    QMessageBox.critical(self, "Ошибка", f"Ошибка обучения {model_name}: {result['error']}")
                     
             except Exception as e:
-                error_msg = f"Training error {model_name}: {e}"
-                QMessageBox.critical(self, "Error", error_msg)
+                error_msg = f"Ошибка обучения {model_name}: {e}"
+                QMessageBox.critical(self, "Ошибка", error_msg)
                 print(error_msg)
         
         self.update_button_states()
         self.update_memory_usage()
-
+        
     def analyze_shap(self):
         if not self.trained_models:
-            QMessageBox.warning(self, "Error", "First, train a model.")
+            QMessageBox.warning(self, "Ошибка", "Сначала обучите модель.")
             return
         
         model_name, model = list(self.trained_models.items())[0]
         
         from .feature_importance_shap_logic import analyze_shap as logic_analyze_shap
         
+        explainer_type = self.explainer_combo.currentText()
+        
         result = logic_analyze_shap(
-            explainer_type=self.explainer_combo.currentText(),
+            explainer_type=explainer_type,
             model=model,
             X_train=self.X_train,
             sample_size=self.sample_size_combo.currentText(),
@@ -424,14 +470,19 @@ class FeatureImportanceSHAPUI(QWidget):
             self.shap_explainer = result['explainer']
             self.shap_values = result['shap_values']
             self.X_sample = result['X_sample']
-            self.plot_shap()
+            
+            # Добавим реальное имя объяснителя
+            actual_explainer_name = result['explainer'].__class__.__name__.replace("Explainer", "") if result['explainer'] else "Unknown"
+            
+            # Передаём explainer_type в plot_shap
+            self.plot_shap(explainer_type=explainer_type)
             self.update_button_states()
         else:
-            error_msg = f"Error analyzing SHAP: {result['error']}"
-            QMessageBox.critical(self, "Error", error_msg)
+            error_msg = f"Ошибка при анализе SHAP: {result['error']}"
+            QMessageBox.critical(self, "Ошибка", error_msg)
             print(error_msg)
 
-    def plot_shap(self):
+    def plot_shap(self, explainer_type="Auto"):
         if self.shap_values is None:
             return
 
@@ -440,13 +491,13 @@ class FeatureImportanceSHAPUI(QWidget):
         feature_names = self.X_train.columns.tolist()
 
         # Determine sorting
-        if sort_order == "Descending":
+        if sort_order == "По убыванию":
             # Sort by mean |value|
             values = np.array(self.shap_values.values)
             if values.ndim == 1:
                 values = values.reshape(1, -1)
             feature_order = np.argsort(-np.abs(values).mean(axis=0))
-        elif sort_order == "Alphabetical":
+        elif sort_order == "По алфавиту":
             feature_order = np.argsort(feature_names)
         else:  # Original Order
             feature_order = np.arange(len(feature_names))
@@ -476,16 +527,38 @@ class FeatureImportanceSHAPUI(QWidget):
                     # Создаём новый список имён для отображения
                     features_display_names = [name_mapping.get(name, name) for name in features_display_names]
             except Exception as e:
-                print(f"Error creating display names: {e}")
+                print(f"Ошибка при создании имён: {e}")
 
         # Создание и отображение Top-5 признаков
         top_k = 5
         top_indices = feature_order[:top_k]
         top_features = [features_display_names[i] for i in range(min(top_k, len(features_display_names)))]
         
-        features_text = "<b>Top-5 признаков:</b><br>" + "<br>".join(
+        features_text = "<b>Топ-5 признаков:</b><br>" + "<br>".join(
             f"{i+1}. {name}" for i, name in enumerate(top_features)
         )
+        
+        # Получаем информацию для отображения
+        # Получаем информацию для отображения
+        method_display_name = explainer_type
+        if explainer_type == "Авто" and hasattr(self, 'shap_explainer'):
+            # Получаем реальный тип из построенного экземпляра объяснителя
+            explainer_class = self.shap_explainer.__class__.__name__
+            if "Tree" in explainer_class:
+                method_display_name = "TreeExplainer"
+            elif "Linear" in explainer_class:
+                method_display_name = "LinearExplainer"
+            elif "Kernel" in explainer_class:
+                method_display_name = "KernelExplainer"
+            else:
+                method_display_name = explainer_class
+        
+        features_text = f"""
+        <b>Метод:</b> {method_display_name}<br>
+        <b>Тип графика:</b> {plot_type}<br>
+        <b>Сортировка:</b> {sort_order}<br>
+        <b>Топ-5 признаков:</b><br>
+        """ + "<br>".join(f"{i+1}. {name}" for i, name in enumerate(top_features))
         
         features_label = QLabel(features_text)
         features_label.setWordWrap(True)
@@ -494,7 +567,7 @@ class FeatureImportanceSHAPUI(QWidget):
         fig, ax = plt.subplots(figsize=(10, 6))
         
         # Генерация графика в зависимости от типа
-        if plot_type == "Summary Plot":
+        if plot_type == "Сводный график":
             # Проверяем, является ли shap_values списком (multi-output)
             if isinstance(self.shap_values, list):
                 # Для multi-output используем bar plot
@@ -502,9 +575,9 @@ class FeatureImportanceSHAPUI(QWidget):
             else:
                 # Для single-output можно использовать dot
                 shap.summary_plot(self.shap_values, self.X_sample, feature_names=features_display_names, plot_type="dot", show=False)
-        elif plot_type == "Bar":
+        elif plot_type == "Столбчатый":
             shap.summary_plot(self.shap_values, features=self.X_sample, feature_names=features_display_names, plot_type="bar", show=False)
-        elif plot_type == "Beeswarm":
+        elif plot_type == "Пчелиное гнездо":
             shap.plots.beeswarm(self.shap_values, features=self.X_sample, feature_names=features_display_names, show=False)
             
         # Настройка отображения
@@ -518,27 +591,46 @@ class FeatureImportanceSHAPUI(QWidget):
             'plot_type': plot_type,
             'sort_order': sort_order,
             'top_n': top_n,
-            'feature_names': self.X_train.columns.tolist(),
+            'feature_names': feature_names,
             'features_display_names': features_display_names,
-            'task_type': self.task_type
+            'task_type': self.task_type,
+            'explainer_type': explainer_type
         }
 
         # Создание виджета с кнопкой "Показать график"
         widget = QWidget()
+        widget.setFixedWidth(200)
         layout = QVBoxLayout()
         layout.addWidget(features_label)
         
-        # Кнопка для показа только этого графика
-        show_btn = QPushButton("Показать график")
-        show_btn.clicked.connect(lambda: self.show_single_plot(fig, plot_data))
-        layout.addWidget(show_btn)
+        # Горизонтальный макет для кнопок
+        buttons_layout = QHBoxLayout()
         
+        # Кнопка для показа только этого графика
+        show_btn = QPushButton("👁️📊")
+        show_btn.setToolTip("Показать график")
+        show_btn.clicked.connect(lambda: self.show_single_plot(fig, plot_data))
+        buttons_layout.addWidget(show_btn)
+
+        # Кнопка 'Сохранить значения'
+        save_values_btn = QPushButton("💾🔢")
+        save_values_btn.setToolTip("Сохранить данные")
+        save_values_btn.clicked.connect(lambda: self.save_shap_values_for_plot(plot_data))
+        buttons_layout.addWidget(save_values_btn)
+
+        # Кнопка 'Сохранить график'
+        save_plot_btn = QPushButton("💾📊")
+        save_plot_btn.setToolTip("Сохранить график")
+        save_plot_btn.clicked.connect(lambda: self.save_shap_plot_for_plot(plot_data))
+        buttons_layout.addWidget(save_plot_btn)
+        
+        layout.addLayout(buttons_layout)
         widget.setLayout(layout)
         
         # Добавляем виджет, фигуру и данные в историю
         self.plots_history.append((widget, fig))
         self.plot_figures.append(fig)
-        self.plot_data_cache.append(plot_data)  # Сохраняем данные для перестроения
+        self.plot_data_cache.append(plot_data)
         
         # Если графиков больше 5, удаляем самый левый (старый)
         if len(self.plots_history) > self.max_displayed_plots:
@@ -575,14 +667,14 @@ class FeatureImportanceSHAPUI(QWidget):
             plot_type = plot_data['plot_type']
             features_display_names = plot_data['features_display_names']
 
-            if plot_type == "Summary Plot":
+            if plot_type == "Сводный график":
                 if isinstance(shap_values, list):
                     shap.summary_plot(shap_values, X_sample, feature_names=features_display_names, plot_type="bar", show=False)
                 else:
                     shap.summary_plot(shap_values, X_sample, feature_names=features_display_names, plot_type="dot", show=False)
-            elif plot_type == "Bar":
+            elif plot_type == "Столбчатый":
                 shap.summary_plot(shap_values, features=X_sample, feature_names=features_display_names, plot_type="bar", show=False)
-            elif plot_type == "Beeswarm":
+            elif plot_type == "Пчелиное гнездо":
                 shap.plots.beeswarm(shap_values, features=X_sample, feature_names=features_display_names, show=False)
             
             plt.title(f"{plot_type} - {plot_data['sort_order']}")
