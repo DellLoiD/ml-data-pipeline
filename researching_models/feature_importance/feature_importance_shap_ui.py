@@ -142,26 +142,15 @@ class FeatureImportanceSHAPUI(QWidget):
         self.sample_size_combo.addItems(["100", "500", "1000", "все"])
         self.sample_size_combo.setCurrentText("100")
         
-        # Топ-N признаков
-        self.top_n_spin = QSpinBox()
-        self.top_n_spin.setRange(1, 100)
-        self.top_n_spin.setValue(15)
-        
         # Группировка: Метод + Размер
         method_size_layout = QHBoxLayout()
         method_size_layout.addWidget(QLabel("Метод:"))
         method_size_layout.addWidget(self.explainer_combo)
         method_size_layout.addWidget(QLabel("Размер:"))
         method_size_layout.addWidget(self.sample_size_combo)
-        
-        # Группировка: Топ-N
-        top_n_layout = QHBoxLayout()
-        top_n_layout.addWidget(QLabel("Топ-N:"))
-        top_n_layout.addWidget(self.top_n_spin)
 
         # Добавляем сгруппированные макеты в общий layout
         shap_settings_layout.addLayout(method_size_layout)
-        shap_settings_layout.addLayout(top_n_layout)
 
         shap_settings_group.setLayout(shap_settings_layout)
 
@@ -502,12 +491,9 @@ class FeatureImportanceSHAPUI(QWidget):
         else:  # Original Order
             feature_order = np.arange(len(feature_names))
 
-        # Limit by Top-N
-        top_n = self.top_n_spin.value()
-        feature_order = feature_order[:top_n]
+
 
         # Создание отображаемых имён
-        # Преобразуем feature_order в одномерный массив индексов
         feature_order = np.array(feature_order).flatten()
         features_display_names = [feature_names[i] for i in feature_order]  
         if hasattr(self, 'df') and self.df is not None:
@@ -566,19 +552,126 @@ class FeatureImportanceSHAPUI(QWidget):
         # Создание фигуры
         fig, ax = plt.subplots(figsize=(10, 6))
         
+        # По умолчанию используем оригинальные значения
+        values = self.shap_values.values
+        feature_names = self.X_train.columns.tolist()
+        X_sample_current = self.X_sample
+        features_display_names = feature_names[:]  # По умолчанию без изменений
+        
+        # Обновляем порядок сортировки
+        if sort_order == "По убыванию":
+            # Sort by mean |value|
+            values_array = np.array(values)
+            if values_array.ndim == 1:
+                values_array = values_array.reshape(1, -1)
+            feature_order = np.argsort(-np.abs(values_array).mean(axis=0))
+        elif sort_order == "По алфавиту":
+            feature_order = np.argsort(feature_names)
+        else:  # Original Order
+            feature_order = np.arange(len(feature_names))
+
+        # Агрегация значений для категориальных признаков
+        if hasattr(self, 'df') and self.df is not None:
+            try:
+                cat_columns = self.df.select_dtypes(include=['object']).columns
+                if len(cat_columns) > 0:
+                    # Создаём словарь для отображения закодированных имён в исходные
+                    original_feature_names = {}
+                    for col in cat_columns:
+                        unique_vals = self.df[col].astype(str).unique()
+                        for val in unique_vals:
+                            encoded_name = f"{col}_{val}"
+                            if encoded_name in feature_names:
+                                if col not in original_feature_names:
+                                    original_feature_names[col] = []
+                                original_feature_names[col].append(encoded_name)
+                    
+                    print(f"[DEBUG] Найдены категориальные признаки: {dict(original_feature_names)}")
+                    
+                    # Агрегируем SHAP значения по исходным признакам
+                    shap_values_agg = self.shap_values.values.copy()
+                    feature_names_agg = feature_names[:]
+                    
+                    # Для каждого категориального признака объединяем значения
+                    for orig_col, encoded_cols in original_feature_names.items():
+                        if len(encoded_cols) <= 1:
+                            print(f"[DEBUG] Пропуск {orig_col}: {len(encoded_cols)} закодированных признаков (нужно >1)")
+                            continue
+                        # Находим индексы закодированных признаков
+                        idxs = [feature_names.index(col) for col in encoded_cols if col in feature_names]
+                        if len(idxs) < 2:
+                            print(f"[DEBUG] Недостаточно индексов для {orig_col}: {idxs}")
+                            continue
+                        print(f"[DEBUG] Агрегация {orig_col}: {encoded_cols} -> индексы {idxs}")
+                        
+                        # Суммируем SHAP значения по всем объектам
+                        if shap_values_agg.ndim == 2:
+                            aggregated_values = np.sum(shap_values_agg[:, idxs], axis=1)
+                            print(f"[DEBUG] Агрегированные значения (mean |SHAP|): {np.abs(aggregated_values).mean():.4f}")
+                        else:
+                            aggregated_values = np.sum(shap_values_agg[idxs])
+                            print(f"[DEBUG] Агрегированное значение: {aggregated_values:.4f}")
+                        
+                        # Заменяем первый признак суммой, удаляем остальные
+                        # Создаём новые массивы
+                        if shap_values_agg.ndim == 2:
+                            new_shap_values = np.delete(shap_values_agg, idxs[1:], axis=1)
+                            new_shap_values[:, idxs[0]] = aggregated_values
+                        else:
+                            new_shap_values = np.delete(shap_values_agg, idxs[1:])
+                            new_shap_values[idxs[0]] = aggregated_values
+                        shap_values_agg = new_shap_values
+                        
+                        # Обновляем имена признаков
+                        new_feature_names = [name for i, name in enumerate(feature_names_agg) if i not in idxs[1:]]
+                        new_feature_names[idxs[0]] = orig_col
+                        feature_names_agg = new_feature_names
+                        
+                        print(f"[DEBUG] После агрегации: {orig_col} -> {new_feature_names[idxs[0]]}, осталось признаков: {len(new_feature_names)}")
+                    
+                    # Обновляем значения после агрегации
+                    values = shap_values_agg
+                    feature_names = feature_names_agg
+                    
+                    # Убедимся, что X_sample_current соответствует размеру
+                    if self.X_sample.shape[1] == len(feature_names):
+                        X_sample_current = self.X_sample
+                    else:
+                        # Если размеры не совпадают, используем только нужные столбцы
+                        X_sample_current = self.X_sample[:, :len(feature_names)]
+                    
+                    print(f"[DEBUG] Финальное количество признаков после агрегации: {len(feature_names)}")
+                    
+                    # Обновляем порядок сортировки
+                    if sort_order == "По убыванию":
+                        values_array = np.array(values)
+                        if values_array.ndim == 1:
+                            values_array = values_array.reshape(1, -1)
+                        feature_order = np.argsort(-np.abs(values_array).mean(axis=0))
+                    elif sort_order == "По алфавиту":
+                        feature_order = np.argsort(feature_names)
+                    else:
+                        feature_order = np.arange(len(feature_names))
+                    
+                    # Обновляем отображаемые имена
+                    features_display_names = [feature_names[i] for i in feature_order]
+                    
+            except Exception as e:
+                print(f"Ошибка при агрегации SHAP значений: {e}")
+
         # Генерация графика в зависимости от типа
         if plot_type == "Сводный график":
             # Проверяем, является ли shap_values списком (multi-output)
             if isinstance(self.shap_values, list):
                 # Для multi-output используем bar plot
-                shap.summary_plot(self.shap_values, self.X_sample, feature_names=features_display_names, plot_type="bar", show=False)
+                shap.summary_plot([values], X_sample_current, feature_names=features_display_names, plot_type="bar", show=False)
             else:
                 # Для single-output можно использовать dot
-                shap.summary_plot(self.shap_values, self.X_sample, feature_names=features_display_names, plot_type="dot", show=False)
+                shap.summary_plot(values, X_sample_current, feature_names=features_display_names, plot_type="dot", show=False)
         elif plot_type == "Столбчатый":
-            shap.summary_plot(self.shap_values, features=self.X_sample, feature_names=features_display_names, plot_type="bar", show=False)
+            shap.summary_plot(values, features=X_sample_current, feature_names=features_display_names, plot_type="bar", show=False)
         elif plot_type == "Пчелиное гнездо":
-            shap.plots.beeswarm(self.shap_values, features=self.X_sample, feature_names=features_display_names, show=False)
+            shap.plots.beeswarm(values, features=X_sample_current, feature_names=features_display_names, show=False)
             
         # Настройка отображения
         ax.set_title(f"{plot_type} - {sort_order}")
@@ -587,10 +680,10 @@ class FeatureImportanceSHAPUI(QWidget):
         # Кэшируем данные для перестроения
         plot_data = {
             'shap_values': self.shap_values,
-            'X_sample': self.X_sample,
+            'X_sample': X_sample_current,
             'plot_type': plot_type,
             'sort_order': sort_order,
-            'top_n': top_n,
+
             'feature_names': feature_names,
             'features_display_names': features_display_names,
             'task_type': self.task_type,

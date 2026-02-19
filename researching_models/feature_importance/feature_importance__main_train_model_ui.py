@@ -59,14 +59,28 @@ class DeleteColumnsDialog(QDialog):
         sorted_columns = columns
 
         if importances_dict:
-            col_importance = {col: sum(importances_dict.get(col, [0])) / len(importances_dict.get(col, [0])) for col in columns}
+            # Вычисляем среднюю важность для каждого признака
+            col_importance = {}
+            for col in columns:
+                imp_list = importances_dict.get(col, [0])
+                avg_imp = sum(imp_list) / len(imp_list) if len(imp_list) > 0 else 0
+                col_importance[col] = avg_imp
+            # Сортируем по возрастанию важности (сначала наименее важные — удобнее удалять)
             sorted_columns = sorted(columns, key=lambda col: col_importance.get(col, 0))
+            self.col_importance = col_importance  # Сохраняем для отображения и синхронизации
+            
+            # Отладочный вывод
+            print("[DEBUG] Веса признаков (до сортировки):", col_importance)
+            print("[DEBUG] Отсортированные колонки по возрастанию важности:", sorted_columns)
         else:
             sorted_columns = sorted(columns)
+            self.col_importance = {col: 0 for col in columns}
 
         for idx, col in enumerate(sorted_columns):
-            cb = QCheckBox(str(col))
+            # Отображение значения важности рядом с чекбоксом
+            cb = QCheckBox(f"{col} (важность: {self.col_importance.get(col, 0):.4f})")
             cb.setChecked(False)
+            cb.setProperty("column_name", col)
             grid.addWidget(cb, idx, 0)
             self.checkboxes.append(cb)
 
@@ -87,7 +101,12 @@ class DeleteColumnsDialog(QDialog):
         self.setLayout(layout)
 
     def get_selected_columns(self):
-        return [cb.text() for cb in self.checkboxes if cb.isChecked()]
+        selected = []
+        for cb in self.checkboxes:
+            if cb.isChecked():
+                col_name = cb.text().split(' (важность:')[0]
+                selected.append(col_name)
+        return selected
 
 
 class FeatureImportanceUI(QWidget):
@@ -644,6 +663,38 @@ class FeatureImportanceUI(QWidget):
             # Передача данных и модели в SHAP UI
             self.shap_ui.set_data(self.df, self.target_col)
             success = self.shap_ui.set_trained_model(model, model_name)
+            
+            # === ДОБАВЛЕНО: Обновление self.feature_importances ===
+            try:
+                # Инициализируем словарь, если он ещё не создан
+                if not self.feature_importances:
+                    self.feature_importances = {col: [] for col in self.X_train.columns}
+                
+                # Получаем важности признаков
+                if hasattr(model, 'feature_importances_'):
+                    importances = model.feature_importances_
+                elif hasattr(model, 'coef_'):
+                    # Для линейных моделей
+                    importances = np.abs(model.coef_)
+                    if importances.ndim > 1:
+                        importances = importances.mean(axis=0)
+                    importances = importances.ravel()
+                else:
+                    raise AttributeError("Модель не поддерживает важность признаков")
+                
+                # Записываем важности в общий словарь
+                for idx, col in enumerate(self.X_train.columns):
+                    if col in self.feature_importances:
+                        # Заменяем список на одно значение (или можно append, если нужно хранить историю)
+                        self.feature_importances[col] = [importances[idx]]
+                
+                print(f"[DEBUG] Важности признаков обновлены для модели {model_name}")
+            except Exception as e_imp:
+                print(f"[WARNING] Не удалось получить важность признаков: {e_imp}")
+                # Инициализируем нулевыми значениями, если возникла ошибка
+                self.feature_importances = {col: [0] for col in self.X_train.columns}
+            
+            # === КОНЕЦ ДОБАВЛЕНИЯ ===
             
             if success:
                 QMessageBox.information(self, "Успех", f"Модель {model_name} обучена и передана в SHAP.")

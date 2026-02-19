@@ -183,6 +183,10 @@ def analyze_shap(explainer_type, model, X_train, sample_size="1000", model_task=
 
         shap_values = explainer(X_sample)
         
+        # Агрегация значений для категориальных признаков, если нужно
+        # В данном случае, так как признаки уже закодированы, агрегация не требуется
+        # Но если нужно объединить, например, dummy-переменные, можно добавить логику здесь
+        
         return {
             'success': True,
             'shap_values': shap_values,
