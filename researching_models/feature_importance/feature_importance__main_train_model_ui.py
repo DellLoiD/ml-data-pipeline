@@ -19,7 +19,6 @@ import gc
 import psutil
 from joblib import parallel_backend
 
-
 class HelpDialog(QDialog):
     """Справка по метрикам и параметрам"""
     def __init__(self, title, text, parent=None):
@@ -34,13 +33,12 @@ class HelpDialog(QDialog):
         layout.addWidget(text_label)
         self.setLayout(layout)
 
-
 class DeleteColumnsDialog(QDialog):
     """Диалог для выбора колонок для удаления — сортирует по важности (от низкой к высокой)"""
     def __init__(self, columns, importances_dict=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Удалить колонки")
-        self.resize(350, 400)
+        self.resize(150, 200)
 
         layout = QVBoxLayout()
 
@@ -67,7 +65,7 @@ class DeleteColumnsDialog(QDialog):
                 col_importance[col] = avg_imp
             # Сортируем по возрастанию важности (сначала наименее важные — удобнее удалять)
             sorted_columns = sorted(columns, key=lambda col: col_importance.get(col, 0))
-            self.col_importance = col_importance  # Сохраняем для отображения и синхронизации
+            self.col_importance = col_importance  
             
             # Отладочный вывод
             print("[DEBUG] Веса признаков (до сортировки):", col_importance)
@@ -108,7 +106,6 @@ class DeleteColumnsDialog(QDialog):
                 selected.append(col_name)
         return selected
 
-
 class FeatureImportanceUI(QWidget):
     def safe_int(self, params, key, default):
         try:
@@ -146,7 +143,7 @@ class FeatureImportanceUI(QWidget):
         self.meta_tracker = MetaTracker()
         self.feature_importances = {}
         self.process = psutil.Process(os.getpid())
-        self.plot_settings = {}  # Для хранения настроек графика
+        self.plot_settings = {}
         
         # SHAP-related attributes
         self.trained_models = {}
@@ -160,26 +157,67 @@ class FeatureImportanceUI(QWidget):
         self.setWindowTitle("Анализ важности признаков")
         main_layout = QVBoxLayout()
 
+        # Горизонтальный макет для строки с заголовком, целевой переменной, памятью, R.S. и n_jobs
+        info_layout = QHBoxLayout()
+
+        # Заголовок (остаётся слева)
         title_label = QLabel("Анализ важности признаков")
         title_label.setFont(QFont("Arial", 14, QFont.Bold))
-        main_layout.addWidget(title_label)
+        info_layout.addWidget(title_label)
+        
+        # Целевая переменная — в центре
+        self.target_label = QLabel("Целевая переменная: не выбрана")
+        self.target_label.setStyleSheet("font-weight: bold;")
+        info_layout.addWidget(self.target_label)
 
-        # Создаём единый горизонтальный макет
-        main_horizontal_layout = QHBoxLayout()
+        # Метка памяти — справа
+        self.memory_label = QLabel("📊 Память: ? МБ")
+        self.memory_label.setStyleSheet("color: #555; font-size: 11px;")
+        info_layout.addWidget(self.memory_label)
 
-        # --- Левая часть: задача и кнопки ---
+        # Добавим R.S. и n_jobs в ту же строку
+        info_layout.addWidget(QLabel("R.S.:"))
+        self.global_random_state = QLineEdit("42")
+        self.global_random_state.setFixedWidth(40)
+        info_layout.addWidget(self.global_random_state)
+
+        help_random = QPushButton("?")
+        help_random.setFixedSize(20, 20)
+        help_random.clicked.connect(lambda: HelpDialog(
+            "Random State",
+            "Фиксация случайности. Для воспроизводимости результатов",
+            self
+        ).exec_())
+        info_layout.addWidget(help_random)
+
+        info_layout.addWidget(QLabel("n_jobs:"))
+        self.global_n_jobs = QLineEdit("1")
+        self.global_n_jobs.setFixedWidth(40)
+        info_layout.addWidget(self.global_n_jobs)
+
+        help_njobs = QPushButton("?")
+        help_njobs.setFixedSize(20, 20)
+        help_njobs.clicked.connect(lambda: HelpDialog(
+            "n_jobs",
+            "Количество ядер CPU для параллельных вычислений.\n"
+            "1 — последовательно (по умолчанию)\n"
+            "-1 — использовать все ядра",
+            self
+        ).exec_())       
+        info_layout.addWidget(help_njobs)
+
+        # Добавляем горизонтальный макет в основной вертикальный
+        main_layout.addLayout(info_layout)
+        
+         # Основной горизонтальный макет для кнопок
+        main_horizontal_layout = QHBoxLayout()        
+
+        # === Строка с пометкой "Задача" и переключателями в одной строке ===
         main_horizontal_layout.addWidget(QLabel("Задача:"))
-
         self.classification_radio = QRadioButton("Классификация")
         self.regression_radio = QRadioButton("Регрессия")
         self.classification_radio.setChecked(True)
         self.regression_radio.setChecked(False)
-
-        self.task_group = QButtonGroup()
-        self.task_group.addButton(self.classification_radio, 1)
-        self.task_group.addButton(self.regression_radio, 2)
-        self.task_group.buttonClicked.connect(self.on_task_selected)
-
         main_horizontal_layout.addWidget(self.classification_radio)
         main_horizontal_layout.addWidget(self.regression_radio)
 
@@ -197,52 +235,10 @@ class FeatureImportanceUI(QWidget):
         self.save_btn.setEnabled(False)
         main_horizontal_layout.addWidget(self.save_btn)
 
-        # --- Центр: глобальные параметры ---
-        main_horizontal_layout.addWidget(QLabel("R.S.: "))
-        self.global_random_state = QLineEdit("42")
-        self.global_random_state.setFixedWidth(20)
-        main_horizontal_layout.addWidget(self.global_random_state)
-        
-        # Кнопки помощи
-        help_random = QPushButton("?")
-        help_random.setFixedSize(20, 20)
-        help_random.clicked.connect(lambda: HelpDialog(
-            "Random State",
-            "Фиксация случайности. Для воспроизводимости результатов",
-            self
-        ).exec_())
-        main_horizontal_layout.addWidget(help_random)
+        main_horizontal_layout.addStretch()  # Растяжка справа
 
-        main_horizontal_layout.addWidget(QLabel("n_jobs: "))
-        self.global_n_jobs = QLineEdit("1")
-        self.global_n_jobs.setFixedWidth(20)
-        main_horizontal_layout.addWidget(self.global_n_jobs) 
-
-        help_njobs = QPushButton("?")
-        help_njobs.setFixedSize(20, 20)
-        help_njobs.clicked.connect(lambda: HelpDialog(
-            "n_jobs",
-            "Количество ядер CPU для параллельных вычислений.\n"
-            "1 — последовательно (по умолчанию)\n"
-            "-1 — использовать все ядра",
-            self
-        ).exec_())
-        main_horizontal_layout.addWidget(help_njobs)
-
-        # Растяжка в конце
-        main_horizontal_layout.addStretch()
-
-        # Добавляем единый макет в основной вертикальный макет
+        # Добавляем макет с кнопками в основной вертикальный макет
         main_layout.addLayout(main_horizontal_layout)
-
-        self.target_label = QLabel("Целевая переменная: не выбрана")
-        self.target_label.setStyleSheet("font-weight: bold;")
-        main_layout.addWidget(self.target_label)
-        
-        # 🔺 МЕТКА ДЛЯ ОТОБРАЖЕНИЯ ПАМЯТИ
-        self.memory_label = QLabel("📊 Память: ? МБ")
-        self.memory_label.setStyleSheet("color: #555; font-size: 11px;")
-        main_layout.addWidget(self.memory_label)
 
         # === Модели (без внешней группировки) ===
         self.classification_box = QGroupBox("Классификация")
@@ -256,7 +252,6 @@ class FeatureImportanceUI(QWidget):
         main_layout.addWidget(self.regression_box)
         
         # === SHAP Analysis Section ===
-        # SHAP UI is now integrated below
         from .feature_importance_shap_ui import FeatureImportanceSHAPUI
         
         # Инициализация и добавление SHAP UI
@@ -275,9 +270,11 @@ class FeatureImportanceUI(QWidget):
         self.shap_ui.update()
         self.create_models()
         self.classification_box.setVisible(self.task_type == "classification")
-        self.regression_box.setVisible(self.task_type == "regression")
-        self.resize(1000, 1100)
+        self.regression_box.setVisible(self.task_type == "регрессия")
+        self.adjustSize()
         self.show()
+        # Кнопка Удалить колонки активна только если есть важности признаков
+        self.delete_columns_btn.setEnabled(bool(self.feature_importances))
         self.update_memory_usage()
         
     def delete_selected_columns(self):
@@ -306,7 +303,9 @@ class FeatureImportanceUI(QWidget):
                 f"Удалены колонки:\n" + "\n".join(to_delete_existing)
             )
 
-            self.update_memory_usage()
+            # Кнопка Удалить колонки активна только если есть важности признаков
+        self.delete_columns_btn.setEnabled(bool(self.feature_importances))
+        self.update_memory_usage()
             
     def save_dataset(self):
         """Сохраняет текущий X_train + y_train в CSV с метаданными"""
@@ -336,6 +335,8 @@ class FeatureImportanceUI(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить:\n{e}")
 
+        # Кнопка Удалить колонки активна только если есть важности признаков
+        self.delete_columns_btn.setEnabled(bool(self.feature_importances))
         self.update_memory_usage()
 
     def kill_child_processes(self):
@@ -371,7 +372,6 @@ class FeatureImportanceUI(QWidget):
         self.task_type = "classification" if self.classification_radio.isChecked() else "regression"
         self.classification_box.setVisible(self.task_type == "classification")
         self.regression_box.setVisible(self.task_type == "regression")
-        # Update SHAP analysis if needed
 
     def create_models(self):
         clf_models = {
@@ -480,6 +480,8 @@ class FeatureImportanceUI(QWidget):
             self.load_btn.setText(f"📁 {filename}")
             self.delete_columns_btn.setEnabled(True)
             self.save_btn.setEnabled(False)
+            # Кнопка Удалить колонки активна только если есть важности признаков
+            self.delete_columns_btn.setEnabled(bool(self.feature_importances))
             self.update_memory_usage()
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить файл:\n{e}")
@@ -511,10 +513,14 @@ class FeatureImportanceUI(QWidget):
         self.delete_columns_btn.setEnabled(True)
         self.save_btn.setEnabled(False)
         self.train_model_btn.setEnabled(True)
+        # Кнопка Удалить колонки активна только если есть важности признаков
+        self.delete_columns_btn.setEnabled(bool(self.feature_importances))
         self.update_memory_usage()
 
     def on_analyze(self):
         self.kill_child_processes()
+        # Кнопка Удалить колонки активна только если есть важности признаков
+        self.delete_columns_btn.setEnabled(bool(self.feature_importances))
         self.update_memory_usage()
         if self.X_train is None or self.y_train is None:
             QMessageBox.warning(self, "Ошибка", "Нет данных для анализа.")
@@ -579,6 +585,8 @@ class FeatureImportanceUI(QWidget):
                         widget.deleteLater()
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Ошибка в {model_name}:\n{e}")
+        # Кнопка Удалить колонки активна только если есть важности признаков
+        self.delete_columns_btn.setEnabled(bool(self.feature_importances))
         self.update_memory_usage()
 
     def _create_model(self, name, params):
@@ -706,4 +714,6 @@ class FeatureImportanceUI(QWidget):
             QMessageBox.critical(self, "Ошибка", error_msg)
             print(error_msg)
         
+        # Кнопка Удалить колонки активна только если есть важности признаков
+        self.delete_columns_btn.setEnabled(bool(self.feature_importances))
         self.update_memory_usage()

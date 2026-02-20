@@ -203,22 +203,19 @@ class FeatureImportanceSHAPUI(QWidget):
         # Результаты (продолжение)
         results_layout = QVBoxLayout()
 
-        help_label = QLabel(
-            "Топ-5 признаков и кнопка графика.\n"
-            "Прокручивайте вправо, чтобы увидеть все модели."
-        )
-        help_label.setWordWrap(True)
-        help_label.setStyleSheet("font-size: 11px; color: #555;")
-        results_layout.addWidget(help_label)
+        #help_label = QLabel("Топ-5 признаков и кнопка графика.\n""Прокручивайте вправо, чтобы увидеть все модели.")
+        #help_label.setWordWrap(True)
+        #help_label.setStyleSheet("font-size: 11px; color: #555;")
+        #results_layout.addWidget(help_label)
 
-        line = QFrame()
-        line.setFrameShape(QFrame.HLine)
-        line.setFrameShadow(QFrame.Sunken)
-        results_layout.addWidget(line)
+        #line = QFrame()
+        #line.setFrameShape(QFrame.HLine)
+        #line.setFrameShadow(QFrame.Sunken)
+        #results_layout.addWidget(line)
 
         # Ограничим количество отображаемых графиков
         self.max_displayed_plots = 5
-        self.plots_history = []  # Список для хранения предыдущих графиков
+        self.plots_history = []
 
         self.results_layout = QHBoxLayout()
         self.results_layout.setSpacing(15)
@@ -240,7 +237,7 @@ class FeatureImportanceSHAPUI(QWidget):
         
         self.setLayout(self.main_layout)
         
-        self.update()  # Принудительное обновление виджета
+        self.update()
 
         # Импорт shap после инициализации UI
         global shap
@@ -251,8 +248,6 @@ class FeatureImportanceSHAPUI(QWidget):
         model_trained = len(self.trained_models) > 0
 
         self.analyze_btn.setEnabled(model_trained)
-        # Кнопки управления убраны, так как их функциональность перенесена в виджеты графиков
-        # Кнопки save_shap_btn и save_plot_btn больше не существуют, проверка не нужна
 
     def save_shap_plot_for_plot(self, plot_data):
         """Сохраняет график SHAP на основе кэшированных данных."""
@@ -267,7 +262,6 @@ class FeatureImportanceSHAPUI(QWidget):
             return
 
         try:
-            # Перестраиваем график заново из кэшированных данных
             plt.figure(figsize=(10, 6))
             ax = plt.gca()
             
@@ -522,9 +516,8 @@ class FeatureImportanceSHAPUI(QWidget):
         
         features_text = "<b>Топ-5 признаков:</b><br>" + "<br>".join(
             f"{i+1}. {name}" for i, name in enumerate(top_features)
-        )
-        
-        # Получаем информацию для отображения
+        )        
+
         # Получаем информацию для отображения
         method_display_name = explainer_type
         if explainer_type == "Авто" and hasattr(self, 'shap_explainer'):
@@ -777,7 +770,6 @@ class FeatureImportanceSHAPUI(QWidget):
     def show_full_shap_plot(self):
         """Отображает полный график в отдельном окне matplotlib"""
         if self.current_fig is None:
-            return
-        
+            return        
         # Показываем график
         plt.show()
