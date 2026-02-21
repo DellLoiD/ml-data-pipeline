@@ -283,11 +283,11 @@ class FeatureImportanceSHAPUI(QWidget):
                 if isinstance(shap_values_data, list) and len(shap_values_data) > 0:
                     shap_values_data = shap_values_data[0]
                 # Создаем Explanation объект
-            explanation = shap.Explanation(
-                values=shap_values_data,
-                data=X_sample_df.values,
-                feature_names=features_display_names
-            )
+                explanation = shap.Explanation(
+                    values=shap_values_data,
+                    data=X_sample_df.values,
+                    feature_names=features_display_names
+                )
             # Для beeswarm нужен одномерный массив значений
             if explanation.values.ndim > 1:
                 # Берем первый класс или усредняем
@@ -863,11 +863,11 @@ class FeatureImportanceSHAPUI(QWidget):
                 if isinstance(shap_values_data, list) and len(shap_values_data) > 0:
                     shap_values_data = shap_values_data[0]
                 # Создаем Explanation объект
-            explanation = shap.Explanation(
-                values=shap_values_data,
-                data=X_sample_df.values,
-                feature_names=features_display_names
-            )
+                explanation = shap.Explanation(
+                    values=shap_values_data,
+                    data=X_sample_df.values,
+                    feature_names=features_display_names
+                )
             # Для beeswarm нужен одномерный массив значений
             if explanation.values.ndim > 1:
                 # Берем первый класс или усредняем
