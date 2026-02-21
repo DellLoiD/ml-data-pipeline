@@ -278,8 +278,37 @@ class FeatureImportanceSHAPUI(QWidget):
             elif plot_type == "Столбчатый":
                 shap.summary_plot(shap_values, features=X_sample, feature_names=features_display_names, plot_type="bar", show=False)
             elif plot_type == "Пчелиное гнездо":
-                shap.plots.beeswarm(shap_values, features=X_sample, feature_names=features_display_names, show=False)
-            
+                X_sample_df = pd.DataFrame(X_sample, columns=features_display_names)
+                shap_values_data = shap_values.values if hasattr(shap_values, 'values') else shap_values
+                if isinstance(shap_values_data, list) and len(shap_values_data) > 0:
+                    shap_values_data = shap_values_data[0]
+                # Создаем Explanation объект
+            explanation = shap.Explanation(
+                values=shap_values_data,
+                data=X_sample_df.values,
+                feature_names=features_display_names
+            )
+            # Для beeswarm нужен одномерный массив значений
+            if explanation.values.ndim > 1:
+                # Берем первый класс или усредняем
+                if explanation.values.shape[1] > 1:
+                    values_flat = np.abs(explanation.values).mean(axis=1)  # Усредняем |values| по классам
+                else:
+                    values_flat = explanation.values[:, 0]
+                # Обрезаем data до нужного количества признаков (количество столбцов = количеству имен признаков)
+                data_trimmed = X_sample_df.values[:, :len(features_display_names)]
+                # Убедимся, что значения и данные имеют одинаковое количество строк
+                if len(values_flat) != len(data_trimmed):
+                    min_len = min(len(values_flat), len(data_trimmed))
+                    values_flat = values_flat[:min_len]
+                    data_trimmed = data_trimmed[:min_len]
+                # Создаем новое объяснение с одномерными значениями
+                explanation = shap.Explanation(
+                    values=values_flat,
+                    data=data_trimmed,
+                    feature_names=features_display_names
+                )
+            shap.plots.beeswarm(explanation, show=False)
             plt.title(f"{plot_type} - {plot_data['sort_order']}")
             plt.tight_layout()
             plt.savefig(path, bbox_inches='tight', dpi=300)
@@ -664,8 +693,76 @@ class FeatureImportanceSHAPUI(QWidget):
         elif plot_type == "Столбчатый":
             shap.summary_plot(values, features=X_sample_current, feature_names=features_display_names, plot_type="bar", show=False)
         elif plot_type == "Пчелиное гнездо":
-            shap.plots.beeswarm(values, features=X_sample_current, feature_names=features_display_names, show=False)
+            X_sample_df = pd.DataFrame(X_sample_current, columns=features_display_names)
+            # Используем shap_values.values для beeswarm, так как сам объект может быть списком
+            shap_values_data = self.shap_values.values if hasattr(self.shap_values, 'values') else self.shap_values
+            if isinstance(shap_values_data, list):
+                shap_values_data = shap_values_data[0]  # Берём первый выход для multi-output
             
+            # Обработка значений в зависимости от размерности
+            if np.ndim(shap_values_data) == 1:
+                # Уже одномерный массив
+                values_flat = shap_values_data
+            elif np.ndim(shap_values_data) == 2:
+                # Для 2D массива (многоклассовая классификация)
+                if shap_values_data.shape[1] == 1:
+                    # Для бинарной классификации берем первый столбец
+                    values_flat = shap_values_data[:, 0]
+                else:
+                    # Для многоклассовой классификации берем среднее по абсолютным значениям
+                    values_flat = np.abs(shap_values_data).mean(axis=1)
+            else:
+                # В крайнем случае, преобразуем в одномерный массив
+                values_flat = np.ravel(shap_values_data)
+            
+            # Убедимся, что количество признаков соответствует количеству имен признаков
+            n_features = len(features_display_names)
+            X_sample_trimmed = X_sample_df.values[:, :n_features]
+            
+            # Убедимся, что количество строк совпадает
+            n_samples = min(len(values_flat), len(X_sample_trimmed))
+            values_flat = values_flat[:n_samples]
+            X_sample_trimmed = X_sample_trimmed[:n_samples]
+            
+            # Создаем Explanation объект с одномерными значениями
+            explanation = shap.Explanation(
+                values=values_flat,
+                data=X_sample_trimmed,
+                feature_names=features_display_names
+            )
+            
+            # Логируем размер explanation перед построением
+            print(f"[DEBUG] Размер explanation: {explanation.shape}")
+            print(f"[DEBUG] Количество экземпляров: {explanation.shape[0]}")
+            # В SHAP значение values[0] может быть значением для одного признака, но мы должны смотреть на общую форму
+            # Для пчелиного гнезда важно, что бы было много экземпляров (строк), а признаков может быть один
+            print(f"[DEBUG] Форма values: {explanation.values.shape}")
+            if explanation.values.ndim == 1:
+                print(f"[DEBUG] Интерпретация: {explanation.values.shape[0]} экземпляров, 1 признак")
+            else:
+                print(f"[DEBUG] Интерпретация: {explanation.values.shape[0]} экземпляров, {explanation.values.shape[1]} признаков")
+            
+            # Теперь формируем Explanation с гарантированно согласованными размерностями
+            # Убедимся, что data имеет только один признак, так как values имеет одну колонку
+            X_sample_corrected = X_sample_trimmed[:, :1] if X_sample_trimmed.ndim > 1 else X_sample_trimmed.reshape(-1, 1)
+            
+            # Обрезаем оба массива до минимального количества строк
+            min_rows = min(values_flat.shape[0], X_sample_corrected.shape[0])
+            values_final = values_flat[:min_rows].reshape(-1, 1)  # Двумерный массив (n, 1)
+            data_final = X_sample_corrected[:min_rows]            # Двумерный массив (n, 1)
+            
+            explanation = shap.Explanation(
+                values=values_final,
+                data=data_final,
+                feature_names=features_display_names[:1] if len(features_display_names) >= 1 else ["feature_0"]
+            )
+            
+            # Логируем окончательные размеры для отладки
+            print(f"[DEBUG] Финальный размер explanation.values: {explanation.values.shape}")
+            print(f"[DEBUG] Финальный размер explanation.data: {explanation.data.shape}")
+            
+            # Теперь строим график
+            shap.plots.beeswarm(explanation, show=False)
         # Настройка отображения
         ax.set_title(f"{plot_type} - {sort_order}")
         plt.tight_layout()
@@ -761,8 +858,37 @@ class FeatureImportanceSHAPUI(QWidget):
             elif plot_type == "Столбчатый":
                 shap.summary_plot(shap_values, features=X_sample, feature_names=features_display_names, plot_type="bar", show=False)
             elif plot_type == "Пчелиное гнездо":
-                shap.plots.beeswarm(shap_values, features=X_sample, feature_names=features_display_names, show=False)
-            
+                X_sample_df = pd.DataFrame(X_sample, columns=features_display_names)
+                shap_values_data = shap_values.values if hasattr(shap_values, 'values') else shap_values
+                if isinstance(shap_values_data, list) and len(shap_values_data) > 0:
+                    shap_values_data = shap_values_data[0]
+                # Создаем Explanation объект
+            explanation = shap.Explanation(
+                values=shap_values_data,
+                data=X_sample_df.values,
+                feature_names=features_display_names
+            )
+            # Для beeswarm нужен одномерный массив значений
+            if explanation.values.ndim > 1:
+                # Берем первый класс или усредняем
+                if explanation.values.shape[1] > 1:
+                    values_flat = np.abs(explanation.values).mean(axis=1)  # Усредняем |values| по классам
+                else:
+                    values_flat = explanation.values[:, 0]
+                # Обрезаем data до нужного количества признаков (количество столбцов = количеству имен признаков)
+                data_trimmed = X_sample_df.values[:, :len(features_display_names)]
+                # Убедимся, что значения и данные имеют одинаковое количество строк
+                if len(values_flat) != len(data_trimmed):
+                    min_len = min(len(values_flat), len(data_trimmed))
+                    values_flat = values_flat[:min_len]
+                    data_trimmed = data_trimmed[:min_len]
+                # Создаем новое объяснение с одномерными значениями
+                explanation = shap.Explanation(
+                    values=values_flat,
+                    data=data_trimmed,
+                    feature_names=features_display_names
+                )
+            shap.plots.beeswarm(explanation, show=False)
             plt.title(f"{plot_type} - {plot_data['sort_order']}")
             plt.tight_layout()
             plt.show()

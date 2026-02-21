@@ -68,7 +68,7 @@ class DeleteColumnsDialog(QDialog):
             self.col_importance = col_importance  
             
             # Отладочный вывод
-            print("[DEBUG] Веса признаков (до сортировки):", col_importance)
+            #print("[DEBUG] Веса признаков (до сортировки):", col_importance)
             print("[DEBUG] Отсортированные колонки по возрастанию важности:", sorted_columns)
         else:
             sorted_columns = sorted(columns)
