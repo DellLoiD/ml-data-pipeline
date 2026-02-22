@@ -178,7 +178,7 @@ class FeatureImportanceUI(QWidget):
         # Добавим R.S. и n_jobs в ту же строку
         info_layout.addWidget(QLabel("R.S.:"))
         self.global_random_state = QLineEdit("42")
-        self.global_random_state.setFixedWidth(40)
+        self.global_random_state.setFixedWidth(20)
         info_layout.addWidget(self.global_random_state)
 
         help_random = QPushButton("?")
@@ -192,7 +192,7 @@ class FeatureImportanceUI(QWidget):
 
         info_layout.addWidget(QLabel("n_jobs:"))
         self.global_n_jobs = QLineEdit("1")
-        self.global_n_jobs.setFixedWidth(40)
+        self.global_n_jobs.setFixedWidth(20)
         info_layout.addWidget(self.global_n_jobs)
 
         help_njobs = QPushButton("?")
@@ -218,6 +218,8 @@ class FeatureImportanceUI(QWidget):
         self.regression_radio = QRadioButton("Регрессия")
         self.classification_radio.setChecked(True)
         self.regression_radio.setChecked(False)
+        self.classification_radio.toggled.connect(self.on_task_selected)
+        self.regression_radio.toggled.connect(self.on_task_selected)
         main_horizontal_layout.addWidget(self.classification_radio)
         main_horizontal_layout.addWidget(self.regression_radio)
 
@@ -270,12 +272,18 @@ class FeatureImportanceUI(QWidget):
         self.shap_ui.update()
         self.create_models()
         self.classification_box.setVisible(self.task_type == "classification")
-        self.regression_box.setVisible(self.task_type == "регрессия")
+        self.regression_box.setVisible(self.task_type == "regression")
         self.adjustSize()
         self.show()
         # Кнопка Удалить колонки активна только если есть важности признаков
         self.delete_columns_btn.setEnabled(bool(self.feature_importances))
         self.update_memory_usage()
+        
+        # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
+        self.shap_ui.update_button_states()
+        
+        # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
+        self.shap_ui.update_button_states()
         
     def delete_selected_columns(self):
         """Открывает диалог для удаления выбранных колонок"""
@@ -306,6 +314,12 @@ class FeatureImportanceUI(QWidget):
             # Кнопка Удалить колонки активна только если есть важности признаков
         self.delete_columns_btn.setEnabled(bool(self.feature_importances))
         self.update_memory_usage()
+        
+        # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
+        self.shap_ui.update_button_states()
+        
+        # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
+        self.shap_ui.update_button_states()
             
     def save_dataset(self):
         """Сохраняет текущий X_train + y_train в CSV с метаданными"""
@@ -338,6 +352,12 @@ class FeatureImportanceUI(QWidget):
         # Кнопка Удалить колонки активна только если есть важности признаков
         self.delete_columns_btn.setEnabled(bool(self.feature_importances))
         self.update_memory_usage()
+        
+        # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
+        self.shap_ui.update_button_states()
+        
+        # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
+        self.shap_ui.update_button_states()
 
     def kill_child_processes(self):
         """Принудительно завершает все дочерние процессы (например, от joblib)"""
@@ -516,12 +536,24 @@ class FeatureImportanceUI(QWidget):
         # Кнопка Удалить колонки активна только если есть важности признаков
         self.delete_columns_btn.setEnabled(bool(self.feature_importances))
         self.update_memory_usage()
+        
+        # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
+        self.shap_ui.update_button_states()
+        
+        # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
+        self.shap_ui.update_button_states()
 
     def on_analyze(self):
         self.kill_child_processes()
         # Кнопка Удалить колонки активна только если есть важности признаков
         self.delete_columns_btn.setEnabled(bool(self.feature_importances))
         self.update_memory_usage()
+        
+        # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
+        self.shap_ui.update_button_states()
+        
+        # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
+        self.shap_ui.update_button_states()
         if self.X_train is None or self.y_train is None:
             QMessageBox.warning(self, "Ошибка", "Нет данных для анализа.")
             return
@@ -588,6 +620,12 @@ class FeatureImportanceUI(QWidget):
         # Кнопка Удалить колонки активна только если есть важности признаков
         self.delete_columns_btn.setEnabled(bool(self.feature_importances))
         self.update_memory_usage()
+        
+        # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
+        self.shap_ui.update_button_states()
+        
+        # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
+        self.shap_ui.update_button_states()
 
     def _create_model(self, name, params):
         random_state = self.safe_int(params, 'Random State', 42)
@@ -717,3 +755,9 @@ class FeatureImportanceUI(QWidget):
         # Кнопка Удалить колонки активна только если есть важности признаков
         self.delete_columns_btn.setEnabled(bool(self.feature_importances))
         self.update_memory_usage()
+        
+        # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
+        self.shap_ui.update_button_states()
+        
+        # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
+        self.shap_ui.update_button_states()

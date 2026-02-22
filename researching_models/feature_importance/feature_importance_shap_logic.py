@@ -3,9 +3,12 @@ from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.preprocessing import StandardScaler
 from joblib import parallel_backend
 import numpy as np
-from PySide6.QtWidgets import QComboBox, QDialog, QVBoxLayout, QLabel, QScrollArea, QWidget, QGridLayout, QCheckBox, QSpacerItem, QSizePolicy, QHBoxLayout, QPushButton
+from PySide6.QtWidgets import QComboBox
 import os
 import psutil
+import logging
+
+logger = logging.getLogger(__name__)
 
 def create_model(model_name, params):
     """Создаёт модель по имени и параметрам"""
@@ -131,62 +134,133 @@ def train_model(model_name, params, X_train, y_train, n_jobs=1):
 
 def analyze_shap(explainer_type, model, X_train, sample_size="1000", model_task="auto"):
     """Анализ SHAP-значений"""
+    logger.info("Начало выполнения analyze_shap в feature_importance_shap_logic.py")
+    logger.info(f"Тип explainer_type: {type(explainer_type)}, значение: {explainer_type}")
+    logger.info(f"Тип model: {type(model)}")
+    logger.info(f"Тип X_train: {type(X_train)}, shape: {X_train.shape if hasattr(X_train, 'shape') else 'unknown'}")
+    logger.info(f"Тип sample_size: {type(sample_size)}, значение: {sample_size}")
+    logger.info(f"Тип model_task: {type(model_task)}, значение: {model_task}")
+    
     try:
         import shap
+        logger.info("SHAP импортирован успешно")
+        
         print(f"X_train type: {type(X_train)}, shape: {X_train.shape if hasattr(X_train, 'shape') else 'unknown'}, dtype: {X_train.dtypes if hasattr(X_train, 'dtypes') else 'unknown'}")
+        if X_train.isnull().values.any():
+            logger.warning("X_train содержит NaN значения, заполняем нулями")
+            X_train = X_train.fillna(0)
         X_scaled = StandardScaler().fit_transform(X_train)
-        print(f"X_scaled contains NaN: {np.isnan(X_scaled).any()}")
+        logger.info(f"X_scaled преобразован, форма: {X_scaled.shape}, содержит NaN: {np.isnan(X_scaled).any()}")
         
         if sample_size == "все":
             X_sample = X_scaled
+            logger.info("Выбрана вся обучающая выборка для X_sample")
         else:
-            sample_size = int(sample_size)
+            try:
+                sample_size = int(sample_size)
+            except ValueError:
+                logger.error(f"Невозможно преобразовать sample_size '{sample_size}' в целое число. Используем значение по умолчанию 100.")
+                sample_size = 100
+            
             # Проверяем, что размер выборки не превышает размер данных
             actual_sample_size = min(sample_size, len(X_scaled))
             # При необходимости разрешаем замены
             replace = actual_sample_size > len(X_scaled)
+            logger.info(f"Выборка: запрашиваемый размер {sample_size}, фактический размер {actual_sample_size}, replace={replace}")
+            
             idx = np.random.choice(len(X_scaled), actual_sample_size, replace=replace)
             X_sample = X_scaled[idx]
+            logger.info(f"X_sample сформирован, форма: {X_sample.shape}")
 
-        # Выбор объяснителя
         # Принудительная проверка X_sample перед использованием
         if X_sample.size == 0:
-            raise ValueError("X_sample пустой после выборки")
+            error_msg = "X_sample пустой после выборки"
+            logger.error(error_msg)
+            return {
+                'success': False,
+                'error': error_msg
+            }
         
         if X_sample.ndim == 1:
             X_sample = X_sample.reshape(-1, 1)
+            logger.info(f"X_sample был 1D, преобразован в 2D: {X_sample.shape}")
 
         if X_sample.ndim != 2:
-            raise ValueError(f"X_sample должен быть 2D массивом, но имеет форму {X_sample.shape}")
+            error_msg = f"X_sample должен быть 2D массивом, но имеет форму {X_sample.shape}"
+            logger.error(error_msg)
+            return {
+                'success': False,
+                'error': error_msg
+            }
 
         if np.isnan(X_sample).any():
             X_sample = np.nan_to_num(X_sample, nan=0.0)
-            print("Внимание: X_sample содержал NaN и был заменён на нули.")
+            logger.warning("X_sample содержал NaN и был заменён на нули.")
 
         # Выбор объяснителя
+        logger.info(f"Инициализация SHAP объяснителя: {explainer_type}")
+        
         if explainer_type == "TreeExplainer" and hasattr(model, 'estimators_'):
+            logger.info("Используется TreeExplainer")
             explainer = shap.TreeExplainer(model)
         elif explainer_type == "LinearExplainer" and hasattr(model, 'coef_'):
+            logger.info("Используется LinearExplainer")
             explainer = shap.LinearExplainer(model, X_sample)
         elif explainer_type == "KernelExplainer":
+            logger.info("Используется KernelExplainer")
             explainer = shap.KernelExplainer(model.predict, X_sample)
         else:
+            logger.info("Используется универсальный Explainer")
             explainer = shap.Explainer(model)
 
         # Повторная проверка после всех преобразований
         if X_sample.ndim != 2:
-            raise ValueError(f"X_sample должен быть 2D массивом, но имеет форму {X_sample.shape}")
+            error_msg = f"X_sample должен быть 2D массивом, но имеет форму {X_sample.shape}"
+            logger.error(error_msg)
+            return {
+                'success': False,
+                'error': error_msg
+            }
 
         if np.isnan(X_sample).any():
             X_sample = np.nan_to_num(X_sample, nan=0.0)
-            print("Внимание: X_sample содержал NaN и был заменён на нули.")
+            logger.warning("X_sample содержал NaN и был заменён на нули.")
 
-        shap_values = explainer(X_sample)
+        logger.info("Начало вычисления SHAP значений...")
+        if not isinstance(explainer, shap.explainers._tree.TreeExplainer):
+            shap_values = explainer(X_sample)
+        else:
+            # Для TreeExplainer обработка может отличаться
+            shap_values_list = []
+            for i in range(X_sample.shape[0]):
+                try:
+                    sv = explainer.shap_values(X_sample[i:i+1])
+                    if isinstance(sv, list):
+                        sv = np.array(sv)
+                    shap_values_list.append(sv)
+                except Exception as e_inner:
+                    logger.error(f"Ошибка при вычислении SHAP значений для образца {i}: {e_inner}")
+                    continue
+            if shap_values_list:
+                # Агрегация всех значений
+                if isinstance(shap_values_list[0], np.ndarray) and shap_values_list[0].ndim > 1:
+                    shap_values = np.concatenate(shap_values_list, axis=0)
+                else:
+                    shap_values = np.array(shap_values_list)
+                logger.info(f"SHAP значения вычислены для {len(shap_values_list)} образцов, форма: {shap_values.shape}")
+            else:
+                error_msg = "Не удалось вычислить SHAP значения для любого образца"
+                logger.error(error_msg)
+                return {
+                    'success': False,
+                    'error': error_msg
+                }
         
         # Агрегация значений для категориальных признаков, если нужно
         # В данном случае, так как признаки уже закодированы, агрегация не требуется
         # Но если нужно объединить, например, dummy-переменные, можно добавить логику здесь
         
+        logger.info("Анализ SHAP успешно завершен. Возвращаем результат.")
         return {
             'success': True,
             'shap_values': shap_values,
@@ -194,6 +268,7 @@ def analyze_shap(explainer_type, model, X_train, sample_size="1000", model_task=
             'X_sample': X_sample
         }
     except Exception as e:
+        logger.error(f"Исключение в analyze_shap: {type(e).__name__}: {e}", exc_info=True)
         return {
             'success': False,
             'error': str(e)
