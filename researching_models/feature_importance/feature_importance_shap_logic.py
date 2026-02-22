@@ -10,60 +10,61 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def create_model(model_name, params):
+def create_model(model_name, params, task_type="classification"):
     """Создаёт модель по имени и параметрам"""
-    random_state = safe_int(params, 'Random State', 42)
-    n_estimators = safe_int(params, 'Кол-во деревьев', 100)
+    random_state = safe_int(params, 'Random State')
+    n_estimators = safe_int(params, 'Кол-во деревьев')
 
-    if 'Random Forest Classification' in model_name:
-        max_depth = safe_int_or_none(params, 'Max Depth', None)
-        min_samples_split = safe_int(params, 'Min Samples Split', 2)
+    if 'Random Forest' in model_name and task_type == "classification":
+        print(f"[DEBUG] Условие 'Random Forest' и 'classification' выполнено для model_name='{model_name}'")
+        max_depth = safe_int_or_none(params, 'Max Depth')
+        min_samples_split = safe_int(params, 'Min Samples Split')
         return RandomForestClassifier(
             n_estimators=n_estimators,
             max_depth=max_depth,
             min_samples_split=min_samples_split,
             random_state=random_state
         )
-    elif 'Gradient Boosting Classification' in model_name:
-        max_depth = safe_int_or_none(params, 'Max Depth', 3)
-        learning_rate = safe_float(params, 'Learning Rate', 0.1)
+    elif 'Gradient Boosting' in model_name and task_type == "classification":
+        max_depth = safe_int_or_none(params, 'Max Depth')
+        learning_rate = safe_float(params, 'Learning Rate')
         return GradientBoostingClassifier(
             n_estimators=n_estimators,
             learning_rate=learning_rate,
             max_depth=max_depth,
             random_state=random_state
         )
-    elif 'Logistic Regression Classification' in model_name:
-        C = safe_float(params, 'C', 1.0)
-        max_iter = safe_int(params, 'Max Iterations', 100)
+    elif 'Logistic Regression' in model_name and task_type == "classification":
+        C = safe_float(params, 'C')
+        max_iter = safe_int(params, 'Max Iterations')
         penalty = params.get('Penalty', None)
-        penalty = penalty.currentText() if isinstance(penalty, QComboBox) else penalty.text().strip() if penalty else 'l2'
+        penalty = penalty.currentText() if isinstance(penalty, QComboBox) else penalty.text().strip()
         penalty = penalty if penalty in ['l1', 'l2', 'none'] else 'l2'
         solver = 'liblinear' if penalty in ['l1', 'l2'] else 'saga'
         return LogisticRegression(C=C, max_iter=max_iter, penalty=penalty, solver=solver, random_state=random_state)
-    elif 'Random Forest Regression' in model_name:
-        max_depth = safe_int_or_none(params, 'Max Depth', None)
-        min_samples_split = safe_int(params, 'Min Samples Split', 2)
+    elif 'Random Forest' in model_name and task_type == "regression":
+        max_depth = safe_int_or_none(params, 'Max Depth')
+        min_samples_split = safe_int(params, 'Min Samples Split')
         return RandomForestRegressor(
             n_estimators=n_estimators,
             max_depth=max_depth,
             min_samples_split=min_samples_split,
             random_state=random_state
         )
-    elif 'Gradient Boosting Regression' in model_name:
-        max_depth = safe_int_or_none(params, 'Max Depth', 3)
-        learning_rate = safe_float(params, 'Learning Rate', 0.1)
+    elif 'Gradient Boosting' in model_name and task_type == "regression":
+        max_depth = safe_int_or_none(params, 'Max Depth')
+        learning_rate = safe_float(params, 'Learning Rate')
         return GradientBoostingRegressor(
             n_estimators=n_estimators,
             learning_rate=learning_rate,
             max_depth=max_depth,
             random_state=random_state
         )
-    elif 'Linear Regression' in model_name:
+    elif 'Linear Regression' in model_name and task_type == "regression":
         fit_intercept = params.get('Fit Intercept', None)
         fit_intercept = fit_intercept.currentText() == 'True' if isinstance(fit_intercept, QComboBox) else True
         normalize = params.get('Normalize', None)
-        normalize = normalize.currentText() == 'True' if isinstance(normalize, QComboBox) else False
+        normalize = normalize.currentText() == 'True' if isinstance(normalize, QComboBox) else True
         return LinearRegression(fit_intercept=fit_intercept, normalize=normalize)
     else:
         raise ValueError(f"Неизвестная модель: {model_name}")
@@ -80,7 +81,7 @@ def get_importances(clf):
         raise AttributeError("Модель не поддерживает важность признаков")
 
 
-def safe_int(params, key, default):
+def safe_int(params, key):
     """Безопасное извлечение целого числа из параметров"""
     try:
         val = params[key]
@@ -88,21 +89,21 @@ def safe_int(params, key, default):
             val = val.currentText()
         else:
             val = val.text().strip()
-        return int(val) if val else default
+        return int(val) if val else None
     except:
-        return default
+        return None
 
 
-def safe_float(params, key, default):
+def safe_float(params, key):
     """Безопасное извлечение вещественного числа"""
     try:
         val = params[key].text().strip()
-        return float(val) if val else default
+        return float(val) if val else None
     except:
-        return default
+        return None
 
 
-def safe_int_or_none(params, key, default):
+def safe_int_or_none(params, key):
     """Безопасное извлечение целого или None"""
     try:
         val = params[key].text().strip()
@@ -110,10 +111,10 @@ def safe_int_or_none(params, key, default):
             return None
         return int(val)
     except:
-        return default
+        return None
 
 
-def train_model(model_name, params, X_train, y_train, n_jobs=1):
+def train_model(model_name, params, X_train, y_train, n_jobs):
     """Обучает модель и возвращает её"""
     try:
         X_scaled = StandardScaler().fit_transform(X_train)
@@ -211,7 +212,7 @@ def analyze_shap(explainer_type, model, X_train, sample_size="1000", model_task=
             explainer = shap.KernelExplainer(model.predict, X_sample)
         else:
             logger.info("Используется универсальный Explainer")
-            explainer = shap.Explainer(model)
+            explainer = shap.Explainer(model.predict, X_sample)
 
         # Повторная проверка после всех преобразований
         if X_sample.ndim != 2:

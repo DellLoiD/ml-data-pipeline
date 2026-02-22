@@ -205,7 +205,6 @@ class LearningCurveMainUI(QWidget):
             self.random_search_analyzer.load_separate_datasets(train_path, test_path, target, self.random_search_analyzer.task_type)
             
             self.target_label.setText(f"Целевая: {target}")
-            # Кнопка анализа больше не нужна, анализ запускается из вкладок
 
             train_name = os.path.basename(train_path)
             test_name = os.path.basename(test_path)
@@ -214,11 +213,6 @@ class LearningCurveMainUI(QWidget):
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка загрузки:\n{e}")
-
-
-
-
-
 
     def update_memory_usage(self):
         try:

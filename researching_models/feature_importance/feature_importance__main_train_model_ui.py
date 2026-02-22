@@ -15,7 +15,7 @@ from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import LogisticRegression
 from utils.meta_tracker import MetaTracker
-import gc
+from .feature_importance_shap_logic import train_model
 import psutil
 from joblib import parallel_backend
 
@@ -107,28 +107,28 @@ class DeleteColumnsDialog(QDialog):
         return selected
 
 class FeatureImportanceUI(QWidget):
-    def safe_int(self, params, key, default):
+    def safe_int(self, params, key):
         try:
             val = params[key].text().strip() if key in params else self.sender().parent().findChild(QLineEdit, key).text().strip()
-            return int(val) if val else default
+            return int(val) if val else None
         except:
-            return default
+            return None
 
-    def safe_float(self, params, key, default):
+    def safe_float(self, params, key):
         try:
             val = params[key].text().strip()
-            return float(val) if val else default
+            return float(val) if val else None
         except:
-            return default
+            return None
 
-    def safe_int_or_none(self, params, key, default):
+    def safe_int_or_none(self, params, key):
         try:
             val = params[key].text().strip()
             if not val or val.lower() in ('none', 'null'):
                 return None
             return int(val)
         except:
-            return default
+            return None
     def __init__(self):
         super().__init__()
         self.df = None
@@ -255,6 +255,7 @@ class FeatureImportanceUI(QWidget):
         
         # === SHAP Analysis Section ===
         from .feature_importance_shap_ui import FeatureImportanceSHAPUI
+        from .feature_importance_shap_logic import train_model as train_model
         
         # Инициализация и добавление SHAP UI
         self.shap_ui = FeatureImportanceSHAPUI()
@@ -278,9 +279,6 @@ class FeatureImportanceUI(QWidget):
         # Кнопка Удалить колонки активна только если есть важности признаков
         self.delete_columns_btn.setEnabled(bool(self.feature_importances))
         self.update_memory_usage()
-        
-        # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
-        self.shap_ui.update_button_states()
         
         # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
         self.shap_ui.update_button_states()
@@ -314,9 +312,6 @@ class FeatureImportanceUI(QWidget):
             # Кнопка Удалить колонки активна только если есть важности признаков
         self.delete_columns_btn.setEnabled(bool(self.feature_importances))
         self.update_memory_usage()
-        
-        # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
-        self.shap_ui.update_button_states()
         
         # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
         self.shap_ui.update_button_states()
@@ -539,9 +534,6 @@ class FeatureImportanceUI(QWidget):
         
         # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
         self.shap_ui.update_button_states()
-        
-        # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
-        self.shap_ui.update_button_states()
 
     def on_analyze(self):
         self.kill_child_processes()
@@ -571,7 +563,7 @@ class FeatureImportanceUI(QWidget):
             try:
                 params = self.labels_and_lines.get(model_name, {})
                 clf = self._create_model(model_name, params)
-                with parallel_backend('loky', n_jobs=self.safe_int({'n_jobs': self.global_n_jobs}, 'n_jobs', 1)):
+                with parallel_backend('loky', n_jobs=self.safe_int({'n_jobs': self.global_n_jobs}, 'n_jobs')):
                     clf.fit(X_scaled, self.y_train)
                 importances = self._get_importances(clf)
                 for idx, col in enumerate(feature_names):
@@ -628,15 +620,15 @@ class FeatureImportanceUI(QWidget):
         self.shap_ui.update_button_states()
 
     def _create_model(self, name, params):
-        random_state = self.safe_int(params, 'Random State', 42)
-        n_estimators = self.safe_int(params, 'Кол-во деревьев', 100)
+        random_state = self.safe_int(params, 'Random State')
+        n_estimators = self.safe_int(params, 'Кол-во деревьев')
         # Используем глобальные параметры
-        random_state = self.safe_int({'Random State': self.global_random_state}, 'Random State', 42)
-        n_jobs = self.safe_int({'n_jobs': self.global_n_jobs}, 'n_jobs', 1)
+        random_state = self.safe_int({'Random State': self.global_random_state}, 'Random State')
+        n_jobs = self.safe_int({'n_jobs': self.global_n_jobs}, 'n_jobs')
         
         if name == 'Random Forest':
-            max_depth = self.safe_int_or_none(params, 'Max Depth', None)
-            min_samples_split = self.safe_int(params, 'Min Samples Split', 2)
+            max_depth = self.safe_int_or_none(params, 'Max Depth')
+            min_samples_split = self.safe_int(params, 'Min Samples Split')
             if self.task_type == "classification":
                 return RandomForestClassifier(
                     n_estimators=n_estimators,
@@ -651,8 +643,8 @@ class FeatureImportanceUI(QWidget):
                     random_state=random_state)
         
         elif name == 'Gradient Boosting':
-            max_depth = self.safe_int_or_none(params, 'Max Depth', 3)
-            learning_rate = self.safe_float(params, 'Learning Rate', 0.1)
+            max_depth = self.safe_int_or_none(params, 'Max Depth')
+            learning_rate = self.safe_float(params, 'Learning Rate')
             if self.task_type == "classification":
                 return GradientBoostingClassifier(
                     n_estimators=n_estimators,
@@ -667,8 +659,8 @@ class FeatureImportanceUI(QWidget):
                     random_state=random_state)
         
         elif name == 'Logistic Regression':
-            C = self.safe_float(params, 'C', 1.0)
-            max_iter = self.safe_int(params, 'Max Iterations', 100)
+            C = self.safe_float(params, 'C')
+            max_iter = self.safe_int(params, 'Max Iterations')
             penalty = params.get('Penalty', None)
             penalty = penalty.text().strip() if penalty else 'l2'
             penalty = penalty if penalty in ['l1', 'l2', 'none'] else 'l2'
@@ -695,6 +687,8 @@ class FeatureImportanceUI(QWidget):
         
         try:
             # Создание и обучение модели
+            print(f"[DEBUG] Передача в _create_model: model_name='{model_name}', task_type='{self.task_type}'")
+            print(f"[DEBUG] Параметры: {params}")
             model = self._create_model(model_name, params)
             if model is None:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось создать модель: неизвестное имя '{model_name}'")
@@ -702,9 +696,13 @@ class FeatureImportanceUI(QWidget):
 
             X_scaled = StandardScaler().fit_transform(self.X_train)
             
-            # Обучение модели
-            with parallel_backend('loky', n_jobs=self.safe_int({'n_jobs': self.global_n_jobs}, 'n_jobs', 1)):
-                model.fit(X_scaled, self.y_train)
+            # Обучение модели через оригинальную логику с n_jobs
+            n_jobs_value = self.safe_int({'n_jobs': self.global_n_jobs}, 'n_jobs')
+            result = train_model(model_name, params, X_scaled, self.y_train, n_jobs=n_jobs_value)
+            if not result['success']:
+                QMessageBox.critical(self, "Ошибка", f"Обучение не удалось: {result['error']}")
+                return
+            model = result['model']
             
             # Передача данных и модели в SHAP UI
             self.shap_ui.set_data(self.df, self.target_col)
@@ -755,9 +753,6 @@ class FeatureImportanceUI(QWidget):
         # Кнопка Удалить колонки активна только если есть важности признаков
         self.delete_columns_btn.setEnabled(bool(self.feature_importances))
         self.update_memory_usage()
-        
-        # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
-        self.shap_ui.update_button_states()
         
         # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
         self.shap_ui.update_button_states()

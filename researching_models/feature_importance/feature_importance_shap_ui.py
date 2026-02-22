@@ -34,7 +34,7 @@ class FeatureImportanceSHAPUI(QWidget):
         self.X_train = None
         self.X_sample = None
         self.df = None
-        self.task_type = "classification"
+        self.task_type = "classification" 
         self.init_ui()
 
     def set_trained_model(self, model, model_name):
@@ -151,6 +151,11 @@ class FeatureImportanceSHAPUI(QWidget):
         self.analyze_btn.setEnabled(False)
         self.main_layout.addWidget(self.analyze_btn)
 
+        # Чекбокс для включения/выключения логов
+        self.log_checkbox = QCheckBox("Показывать логи в терминале")
+        self.log_checkbox.setChecked(True)  # По умолчанию включено
+        self.main_layout.addWidget(self.log_checkbox)
+
         # Результаты (продолжение)
         results_layout = QVBoxLayout()
 
@@ -192,6 +197,10 @@ class FeatureImportanceSHAPUI(QWidget):
 
         # Все импорты shap перемещены в начало файла
         pass
+
+    def is_logging_enabled(self):
+        """Возвращает состояние чекбокса логов."""
+        return self.log_checkbox.isChecked() if hasattr(self, 'log_checkbox') else True
 
     def update_button_states(self):
         """Обновляет состояние всех кнопок на основе текущего состояния."""
@@ -306,7 +315,7 @@ class FeatureImportanceSHAPUI(QWidget):
                 logger.info("Анализ SHAP успешно завершен и данные обновлены.")
                 return result
             else:
-                logger.warning("��нализ SHAP завершился без результата или с ошибкой.")
+                logger.warning("Анализ SHAP завершился без результата или с ошибкой.")
                 return None
             
         except Exception as e:
