@@ -110,10 +110,8 @@ def plot_shap(shap_values, X_train, X_sample, task_type, explainer_type="Auto", 
     buttons_layout.addWidget(save_plot_btn)
     
     layout.addLayout(buttons_layout)
-    widget.setLayout(layout)
-    
-    # 7. Логирование завершения
-    # Возвращаем виджет, данные и фигуру
+    widget.setLayout(layout)    
+
     return widget, plot_data, fig
 
 def save_shap_plot_for_plot(plot_data):
@@ -133,7 +131,7 @@ def save_shap_plot_for_plot(plot_data):
         shap_values = plot_data['shap_values']
         X_sample = plot_data['X_sample']
         plot_type = plot_data['plot_type']
-        features_display_names = plot_data['features_display_names']  # Используем features_display_names вместо feature_names
+        features_display_names = plot_data['features_display_names']  
         sort_order = plot_data['sort_order']
         task_type = plot_data['task_type']
         explainer_type = plot_data['explainer_type']

@@ -147,26 +147,10 @@ class FeatureImportanceSHAPUI(QWidget):
         self.analyze_btn = QPushButton("Анализировать")
         self.analyze_btn.clicked.connect(self.analyze_shap)
         self.analyze_btn.setEnabled(False)
-        self.main_layout.addWidget(self.analyze_btn)
-
-        # Чекбокс для включения/выключения логов
-        self.log_checkbox = QCheckBox("Показывать логи в терминале")
-        self.log_checkbox.setChecked(True)  # По умолчанию включено
-        self.main_layout.addWidget(self.log_checkbox)
+        self.main_layout.addWidget(self.analyze_btn)        
 
         # Результаты (продолжение)
         results_layout = QVBoxLayout()
-
-        #help_label = QLabel("Топ-5 признаков и кнопка графика.\n""Прокручивайте вправо, чтобы увидеть все модели.")
-        #help_label.setWordWrap(True)
-        #help_label.setStyleSheet("font-size: 11px; color: #555;")
-        #results_layout.addWidget(help_label)
-
-        #line = QFrame()
-        #line.setFrameShape(QFrame.HLine)
-        #line.setFrameShadow(QFrame.Sunken)
-        #results_layout.addWidget(line)
-
         # Ограничим количество отображаемых графиков
         self.max_displayed_plots = 5
         self.plots_history = []
@@ -192,13 +176,7 @@ class FeatureImportanceSHAPUI(QWidget):
         self.setLayout(self.main_layout)
         
         self.update()
-
-        # Все импорты shap перемещены в начало файла
         pass
-
-    def is_logging_enabled(self):
-        """Возвращает состояние чекбокса логов."""
-        return self.log_checkbox.isChecked() if hasattr(self, 'log_checkbox') else True
 
     def update_button_states(self):
         """Обновляет состояние всех кнопок на основе текущего состояния."""
@@ -352,7 +330,7 @@ class FeatureImportanceSHAPUI(QWidget):
         
         print(f"Начало построения графика SHAP: тип={plot_type}, сортировка={sort_order}")
         
-        widget, plot_data, _ = plot_shap(
+        widget, plot_data, fig = plot_shap(
             shap_values=self.shap_values,
             X_train=self.X_train,
             X_sample=self.X_sample,
@@ -366,7 +344,7 @@ class FeatureImportanceSHAPUI(QWidget):
 
         # Подключаем сигналы кнопок
         show_btn = widget.layout().itemAt(1).layout().itemAt(0).widget()
-        show_btn.clicked.connect(lambda: self.show_single_plot(None, plot_data))
+        show_btn.clicked.connect(lambda checked, d=plot_data: self.show_single_plot(None, d))
 
         save_values_btn = widget.layout().itemAt(1).layout().itemAt(1).widget()
         save_values_btn.clicked.connect(lambda: self.save_shap_values_for_plot(plot_data))
@@ -374,9 +352,11 @@ class FeatureImportanceSHAPUI(QWidget):
         save_plot_btn = widget.layout().itemAt(1).layout().itemAt(2).widget()
         save_plot_btn.clicked.connect(lambda: self.save_shap_plot_for_plot(plot_data))
 
-        # Добавляем виджет, фигуру и данные в историю
+        # Сохраняем фигуру в plot_data для избежания повторного построения
+        plot_data['fig'] = fig
+
+        # Добавляем виджет и данные в историю (фигура теперь в plot_data)
         self.plots_history.append((widget, None))
-        self.plot_figures.append(None)
         self.plot_data_cache.append(plot_data)
         
         # Если графиков больше 5, удаляем самый левый (старый)
@@ -389,31 +369,28 @@ class FeatureImportanceSHAPUI(QWidget):
             if len(self.plot_data_cache) > 0:
                 self.plot_data_cache.pop(0)
 
-        # Очистка текущего макета перед добавлением всех графиков
-        for i in reversed(range(self.results_layout.count())): 
-            self.results_layout.itemAt(i).widget().setParent(None)
-
-        # Добавляем все виджеты из истории слева направо
-        for widget, fig in self.plots_history:
-            self.results_layout.addWidget(widget)
-    
-    def show_full_shap_plot(self):
-        """Отображает полный график в отдельном окне matplotlib"""
-        if self.current_fig is None:
-            print("show_full_shap_plot: current_fig is None, пропуск отображения.")
-            return        
-        # Показываем график
-        plt.show()
-    
+        # Удаляем все виджеты из макета
+        for i in reversed(range(self.results_layout.count())):
+            item = self.results_layout.itemAt(i)
+            if item:
+                widget_item = item.widget()
+                if widget_item:
+                    widget_item.setParent(None)
+        
+        # Добавляем все виджеты из истории
+        for w, f in self.plots_history:
+            self.results_layout.addWidget(w)
+ 
+   
     def show_single_plot(self, fig, plot_data):
         """Показывает отдельный график в новом окне"""
-        # Убедимся, что фигура всё ещё существует
+        # Если фигура существует и активна, показываем её и выходим
         if fig and plt.fignum_exists(fig.number):
             plt.figure(fig.number)
             plt.show()
-        else:
-            # Перестраиваем график заново из кэшированных данных
-            try:
+            return  # Возвращаемся, чтобы избежать повторного построения
+        # Перестраиваем график заново из кэшированных данных
+        try:
                 # Импортируем функции из модулей plots_type
                 from .plots_type.summary_plot import create_summary_plot
                 from .plots_type.bar_plot import create_bar_plot
@@ -444,18 +421,14 @@ class FeatureImportanceSHAPUI(QWidget):
                     else:
                         print("График Пчелиное гнездо успешно построен")
                 else:
-                    raise ValueError(f"Неподдерживаемый тип графика: {plot_type}")
+                    raise ValueError(f"Неподдерживаемый тип графика: {plot_type}") 
                 
                 # Сохраняем фигуру в кэш
-                plot_data['fig'] = fig
-                
-                # Сохраняем фигуру в кэш
-                plot_data['fig'] = fig
-                
+                plot_data['fig'] = fig                
                 # Показываем фигуру
                 plt.figure(fig.number)
                 plt.show()
-            except Exception as e:
-                error_msg = f"Не удалось перестроить график: {e}"
-                QMessageBox.critical(self, "Ошибка", error_msg)
-                print(error_msg)
+        except Exception as e:
+            error_msg = f"Не удалось перестроить график: {e}"
+            QMessageBox.critical(self, "Ошибка", error_msg)
+            print(error_msg)

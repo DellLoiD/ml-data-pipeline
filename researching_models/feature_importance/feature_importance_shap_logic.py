@@ -133,7 +133,7 @@ def train_model(model_name, params, X_train, y_train, n_jobs):
         }
 
 
-def analyze_shap(explainer_type, model, X_train, sample_size="1000", model_task="auto"):
+def analyze_shap(explainer_type, model, X_train, sample_size, model_task="auto"):
     
     try:
         import shap
