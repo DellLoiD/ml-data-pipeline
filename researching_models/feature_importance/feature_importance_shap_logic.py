@@ -134,13 +134,6 @@ def train_model(model_name, params, X_train, y_train, n_jobs):
 
 
 def analyze_shap(explainer_type, model, X_train, sample_size="1000", model_task="auto"):
-    """Анализ SHAP-значений"""
-    logger.info("Начало выполнения analyze_shap в feature_importance_shap_logic.py")
-    logger.info(f"Тип explainer_type: {type(explainer_type)}, значение: {explainer_type}")
-    logger.info(f"Тип model: {type(model)}")
-    logger.info(f"Тип X_train: {type(X_train)}, shape: {X_train.shape if hasattr(X_train, 'shape') else 'unknown'}")
-    logger.info(f"Тип sample_size: {type(sample_size)}, значение: {sample_size}")
-    logger.info(f"Тип model_task: {type(model_task)}, значение: {model_task}")
     
     try:
         import shap
@@ -260,6 +253,24 @@ def analyze_shap(explainer_type, model, X_train, sample_size="1000", model_task=
         # Агрегация значений для категориальных признаков, если нужно
         # В данном случае, так как признаки уже закодированы, агрегация не требуется
         # Но если нужно объединить, например, dummy-переменные, можно добавить логику здесь
+        
+        # Логирование структуры и свойств shap_values
+        logger.info(f"Тип shap_values: {type(shap_values)}")
+        if hasattr(shap_values, 'values'):
+            logger.info(f"Форма shap_values.values: {shap_values.values.shape}")
+            logger.info(f"Тип shap_values.values: {type(shap_values.values)}")
+        if hasattr(shap_values, 'data'):
+            logger.info(f"Наличие данных (data) в shap_values: True")
+        if hasattr(shap_values, 'feature_names'):
+            logger.info(f"Наличие feature_names в shap_values: {shap_values.feature_names}")
+        else:
+            logger.warning("feature_names отсутствует в shap_values. Проверьте, что объяснитель правильно передает имена признаков.")
+        
+        # Проверка на ручное создание Explanation
+        if 'Explanation' in str(type(shap_values)):
+            logger.info("Объект shap_values является экземпляром Explanation.")
+        else:
+            logger.info("shap_values не является явным объектом Explanation (возможно, это массив).")
         
         logger.info("Анализ SHAP успешно завершен. Возвращаем результат.")
         return {

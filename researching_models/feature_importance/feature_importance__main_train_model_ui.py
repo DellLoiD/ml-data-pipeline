@@ -70,15 +70,21 @@ class DeleteColumnsDialog(QDialog):
             # Отладочный вывод
             #print("[DEBUG] Веса признаков (до сортировки):", col_importance)
             print("[DEBUG] Отсортированные колонки по возрастанию важности:", sorted_columns)
+            print("[LOG] Значения важности признаков в окне 'Удалить колонки':", self.col_importance)
         else:
             sorted_columns = sorted(columns)
             self.col_importance = {col: 0 for col in columns}
 
         for idx, col in enumerate(sorted_columns):
-            # Отображение значения важности рядом с чекбоксом
-            cb = QCheckBox(f"{col} (важность: {self.col_importance.get(col, 0):.4f})")
+            # Получаем значение важности
+            importance_value = self.col_importance.get(col, 0)
+            # Создаем чекбокс с отображением названия и важности
+            cb = QCheckBox(f"{col} (важность: {importance_value:.4f})")
             cb.setChecked(False)
+            # Сохраняем имя колонки и значение важности как свойства чекбокса
             cb.setProperty("column_name", col)
+            cb.setProperty("importance_value", importance_value)
+            # Добавляем чекбокс в сетку
             grid.addWidget(cb, idx, 0)
             self.checkboxes.append(cb)
 
@@ -141,7 +147,6 @@ class FeatureImportanceUI(QWidget):
         self.results_layout = None
         self.original_path = None
         self.meta_tracker = MetaTracker()
-        self.feature_importances = {}
         self.process = psutil.Process(os.getpid())
         self.plot_settings = {}
         
@@ -276,8 +281,14 @@ class FeatureImportanceUI(QWidget):
         self.regression_box.setVisible(self.task_type == "regression")
         self.adjustSize()
         self.show()
-        # Кнопка Удалить колонки активна только если есть важности признаков
-        self.delete_columns_btn.setEnabled(bool(self.feature_importances))
+        # Кнопка Удалить колонки активна только если есть shap_values в логике
+        self.delete_columns_btn.setEnabled(self.shap_ui.logic.shap_values is not None)
+        
+        # Принудительное обновление состояния кнопки после построения графика
+        self.shap_ui.update_button_states()
+        
+        # Принудительное обновление состояния кнопки после построения графика
+        self.shap_ui.update_button_states()
         self.update_memory_usage()
         
         # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
@@ -290,7 +301,19 @@ class FeatureImportanceUI(QWidget):
             return
 
         columns = self.X_train.columns.tolist()
-        dialog = DeleteColumnsDialog(columns, importances_dict=self.feature_importances, parent=self)
+        # Используем SHAP значения из shap_ui для сортировки колонок
+        # Получаем shap_values через логику ShapUiLogic, а не напрямую из UI
+        shap_values = self.shap_ui.logic.shap_values
+        if shap_values is not None:
+            if hasattr(shap_values, 'values'):
+                shap_values = shap_values.values
+            # Усредняем абсолютные значения SHAP по всем образцам
+            mean_abs_shap = np.abs(shap_values).mean(axis=0)
+            # Создаем словарь: имя признака -> список важностей из SHAP
+            importances_dict = dict(zip(columns, [[val] for val in mean_abs_shap]))
+        else:
+            importances_dict = None
+        dialog = DeleteColumnsDialog(columns, importances_dict=importances_dict, parent=self)
         if dialog.exec() == QDialog.Accepted:
             to_delete = dialog.get_selected_columns()
             if not to_delete:
@@ -309,8 +332,14 @@ class FeatureImportanceUI(QWidget):
                 f"Удалены колонки:\n" + "\n".join(to_delete_existing)
             )
 
-            # Кнопка Удалить колонки активна только если есть важности признаков
-        self.delete_columns_btn.setEnabled(bool(self.feature_importances))
+        # Кнопка Удалить колонки активна только если есть shap_values в логике
+        self.delete_columns_btn.setEnabled(self.shap_ui.logic.shap_values is not None)
+        
+        # Принудительное обновление состояния кнопки после построения графика
+        self.shap_ui.update_button_states()
+        
+        # Принудительное обновление состояния кнопки после построения графика
+        self.shap_ui.update_button_states()
         self.update_memory_usage()
         
         # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
@@ -344,8 +373,14 @@ class FeatureImportanceUI(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить:\n{e}")
 
-        # Кнопка Удалить колонки активна только если есть важности признаков
-        self.delete_columns_btn.setEnabled(bool(self.feature_importances))
+        # Кнопка Удалить колонки активна только если есть shap_values в логике
+        self.delete_columns_btn.setEnabled(self.shap_ui.logic.shap_values is not None)
+        
+        # Принудительное обновление состояния кнопки после построения графика
+        self.shap_ui.update_button_states()
+        
+        # Принудительное обновление состояния кнопки после построения графика
+        self.shap_ui.update_button_states()
         self.update_memory_usage()
         
         # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
@@ -495,8 +530,7 @@ class FeatureImportanceUI(QWidget):
             self.load_btn.setText(f"📁 {filename}")
             self.delete_columns_btn.setEnabled(True)
             self.save_btn.setEnabled(False)
-            # Кнопка Удалить колонки активна только если есть важности признаков
-            self.delete_columns_btn.setEnabled(bool(self.feature_importances))
+            # Кнопка Удалить колонки теперь зависит от shap_values, а не от self.feature_importances
             self.update_memory_usage()
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить файл:\n{e}")
@@ -528,8 +562,14 @@ class FeatureImportanceUI(QWidget):
         self.delete_columns_btn.setEnabled(True)
         self.save_btn.setEnabled(False)
         self.train_model_btn.setEnabled(True)
-        # Кнопка Удалить колонки активна только если есть важности признаков
-        self.delete_columns_btn.setEnabled(bool(self.feature_importances))
+        # Кнопка Удалить колонки активна только если есть shap_values в логике
+        self.delete_columns_btn.setEnabled(self.shap_ui.logic.shap_values is not None)
+        
+        # Принудительное обновление состояния кнопки после построения графика
+        self.shap_ui.update_button_states()
+        
+        # Принудительное обновление состояния кнопки после построения графика
+        self.shap_ui.update_button_states()
         self.update_memory_usage()
         
         # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
@@ -537,80 +577,14 @@ class FeatureImportanceUI(QWidget):
 
     def on_analyze(self):
         self.kill_child_processes()
-        # Кнопка Удалить колонки активна только если есть важности признаков
-        self.delete_columns_btn.setEnabled(bool(self.feature_importances))
-        self.update_memory_usage()
+        QMessageBox.information(self, "Информация", "Старый способ анализа важности признаков через обучение моделей (без SHAP) больше не поддерживается. Пожалуйста, используйте блок SHAP для анализа.")
+        self.delete_columns_btn.setEnabled(self.shap_ui.logic.shap_values is not None)
         
-        # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
+        # Принудительное обновление состояния кнопки после построения графика
         self.shap_ui.update_button_states()
         
-        # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
+        # Принудительное обновление состояния кнопки после построения графика
         self.shap_ui.update_button_states()
-        if self.X_train is None or self.y_train is None:
-            QMessageBox.warning(self, "Ошибка", "Нет данных для анализа.")
-            return
-        if not self.target_col:
-            QMessageBox.warning(self, "Ошибка", "Целевая переменная не выбрана.")
-            return
-        selected = {cb.text(): True for cb in self.checkboxes if cb.isChecked()}
-        if not selected:
-            QMessageBox.warning(self, "Ошибка", "Выберите хотя бы одну модель.")
-            return
-        X_scaled = StandardScaler().fit_transform(self.X_train)
-        feature_names = self.X_train.columns.tolist()
-        self.feature_importances = {col: [] for col in feature_names}
-        for model_name in selected:
-            try:
-                params = self.labels_and_lines.get(model_name, {})
-                clf = self._create_model(model_name, params)
-                with parallel_backend('loky', n_jobs=self.safe_int({'n_jobs': self.global_n_jobs}, 'n_jobs')):
-                    clf.fit(X_scaled, self.y_train)
-                importances = self._get_importances(clf)
-                for idx, col in enumerate(feature_names):
-                    if col in self.feature_importances:
-                        self.feature_importances[col].append(importances[idx])
-                idx_sorted = np.argsort(importances)[::-1]
-                top_5 = [feature_names[i] for i in idx_sorted[:5]]
-                model_group = QGroupBox(f" {model_name} ")
-                model_group.setStyleSheet("""
-                    QGroupBox {
-                        font-weight: bold;
-                        border: 1px solid #aaa;
-                        border-radius: 6px;
-                        margin: 0;
-                        padding: 10px;
-                        min-width: 240px;
-                    }
-                """)
-                model_layout = QVBoxLayout()
-                model_layout.setSpacing(8)
-                top_text = QTextEdit()
-                top_text.setPlainText(f"ТОП-5:\n" + "\n".join([f"• {f}" for f in top_5]))
-                top_text.setFixedHeight(100)
-                top_text.setReadOnly(True)
-                model_layout.addWidget(top_text)
-                param_text = "<br>".join([f"{k}: {v.text().strip()}" for k, v in params.items()])
-                params_label = QLabel(f"<small><b>Параметры:</b><br>{param_text}</small>")
-                params_label.setWordWrap(True)
-                params_label.setStyleSheet("font-size: 14px; color: #777;")
-                model_layout.addWidget(params_label)
-                plot_btn = QPushButton("📊 График")
-                plot_btn.clicked.connect(
-                    lambda ch, imp=importances.copy(), names=feature_names.copy(), mn=model_name:
-                    self.plot_importance(imp, names, mn)
-                )
-                model_layout.addWidget(plot_btn)
-                model_group.setLayout(model_layout)
-                self.results_layout.addWidget(model_group)
-                while self.results_layout.count() > 3:
-                    item = self.results_layout.takeAt(0)
-                    widget = item.widget()
-                    if widget:
-                        widget.deleteLater()
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка", f"Ошибка в {model_name}:\n{e}")
-        # Кнопка Удалить колонки активна только если есть важности признаков
-        self.delete_columns_btn.setEnabled(bool(self.feature_importances))
         self.update_memory_usage()
         
         # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения
@@ -708,37 +682,8 @@ class FeatureImportanceUI(QWidget):
             self.shap_ui.set_data(self.df, self.target_col)
             success = self.shap_ui.set_trained_model(model, model_name)
             
-            # === ДОБАВЛЕНО: Обновление self.feature_importances ===
-            try:
-                # Инициализируем словарь, если он ещё не создан
-                if not self.feature_importances:
-                    self.feature_importances = {col: [] for col in self.X_train.columns}
-                
-                # Получаем важности признаков
-                if hasattr(model, 'feature_importances_'):
-                    importances = model.feature_importances_
-                elif hasattr(model, 'coef_'):
-                    # Для линейных моделей
-                    importances = np.abs(model.coef_)
-                    if importances.ndim > 1:
-                        importances = importances.mean(axis=0)
-                    importances = importances.ravel()
-                else:
-                    raise AttributeError("Модель не поддерживает важность признаков")
-                
-                # Записываем важности в общий словарь
-                for idx, col in enumerate(self.X_train.columns):
-                    if col in self.feature_importances:
-                        # Заменяем список на одно значение (или можно append, если нужно хранить историю)
-                        self.feature_importances[col] = [importances[idx]]
-                
-                print(f"[DEBUG] Важности признаков обновлены для модели {model_name}")
-            except Exception as e_imp:
-                print(f"[WARNING] Не удалось получить важность признаков: {e_imp}")
-                # Инициализируем нулевыми значениями, если возникла ошибка
-                self.feature_importances = {col: [0] for col in self.X_train.columns}
-            
-            # === КОНЕЦ ДОБАВЛЕНИЯ ===
+            # Теперь окно "Удалить колонки" использует shap_values из shap_ui.
+            # self.feature_importances больше не обновляется — устаревший способ.
             
             if success:
                 QMessageBox.information(self, "Успех", f"Модель {model_name} обучена и передана в SHAP.")
@@ -750,8 +695,14 @@ class FeatureImportanceUI(QWidget):
             QMessageBox.critical(self, "Ошибка", error_msg)
             print(error_msg)
         
-        # Кнопка Удалить колонки активна только если есть важности признаков
-        self.delete_columns_btn.setEnabled(bool(self.feature_importances))
+        # Кнопка Удалить колонки активна только если есть shap_values в логике
+        self.delete_columns_btn.setEnabled(self.shap_ui.logic.shap_values is not None)
+        
+        # Принудительное обновление состояния кнопки после построения графика
+        self.shap_ui.update_button_states()
+        
+        # Принудительное обновление состояния кнопки после построения графика
+        self.shap_ui.update_button_states()
         self.update_memory_usage()
         
         # Обновляем состояние кнопки 'Анализировать' в SHAP UI после успешного обучения

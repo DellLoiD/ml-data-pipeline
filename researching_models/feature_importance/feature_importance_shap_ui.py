@@ -1,5 +1,4 @@
 import os, shap
-import logging
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QMessageBox, QLineEdit, QDialog,
     QCheckBox, QGroupBox, QButtonGroup, QRadioButton, QInputDialog, QScrollArea, QFrame, QComboBox, QSpinBox, QGridLayout
@@ -16,9 +15,6 @@ from sklearn.preprocessing import StandardScaler, LabelEncoder
 from .feature_importance_help_dialog import HelpDialog, MODEL_PARAM_HELP, N_JOBS_HELP, PLOT_HELP_TEXT
 from .shap_ui_management_logic import ShapUiLogic
 
-# Настройка логирования
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
 
 class FeatureImportanceSHAPUI(QWidget):
     def __init__(self):
@@ -26,7 +22,6 @@ class FeatureImportanceSHAPUI(QWidget):
         self.meta_tracker = MetaTracker()
         self.plot_settings = {} 
         self.shap_explainer = None
-        self.shap_values = None
         self.plot_figures = []
         self.plot_data_cache = [] 
         self.logic = ShapUiLogic()
@@ -40,9 +35,12 @@ class FeatureImportanceSHAPUI(QWidget):
     def set_trained_model(self, model, model_name):
         """Устанавливает предварительно обученную модель извне."""
         return self.logic.set_trained_model(model, model_name)
-
+    
     def set_data(self, df, target_col):
         """Устанавливает данные для анализа извне. Вызывает подготовку данных."""
+        # Сохраняем ссылку на исходный DataFrame
+        self.df = df
+        # Передаем дальше в логику
         return self.logic.set_data(df, target_col)
 
     def init_ui(self):
@@ -206,6 +204,9 @@ class FeatureImportanceSHAPUI(QWidget):
         """Обновляет состояние всех кнопок на основе текущего состояния."""
         logic_state = self.logic.update_button_states()
         self.analyze_btn.setEnabled(logic_state['analyze_btn_enabled'])
+        # Обновляем состояние кнопки "Удалить колонки" в основном UI
+        if hasattr(self.parent(), 'delete_columns_btn') and 'delete_columns_btn_enabled' in logic_state:
+            self.parent().delete_columns_btn.setEnabled(logic_state['delete_columns_btn_enabled'])
 
     def _add_model_to_layout(self, model_name, params, defaults, layout):
         hbox = QHBoxLayout()
@@ -258,36 +259,21 @@ class FeatureImportanceSHAPUI(QWidget):
         return create_model(model_name, params)
 
     def analyze_shap(self):
-        logger.info("Начало анализа SHAP. Проверка входных данных...")
-        try:
+        
             from .shap_interaction import analyze_shap
-            
-            logger.info(f"Текущее состояние: X_train = {self.logic.X_train is not None}, "
-                       f"trained_models = {len(self.logic.trained_models) if self.logic.trained_models else 0}")
             
             # Проверка данных перед анализом
             if self.logic.X_train is None:
-                logger.error("X_train не установлен. Прерывание анализа.")
                 return None
                 
             if not self.logic.trained_models:
-                logger.error("Нет обученных моделей для анализа.")
-                return None
-
-            logger.info(f"Параметры анализа:")
-            logger.info(f"- Метод объяснения: {self.explainer_combo.currentText()}")
-            logger.info(f"- Размер выборки: {self.sample_size_combo.currentText()}")
-            logger.info(f"- Тип задачи: {self.logic.task_type}")
-            
-            if self.logic.X_train is not None:
-                logger.info(f"- Размер обучающей выборки: {self.logic.X_train.shape}")
-            
+                return None            
             # Передаем атрибуты напрямую, избегая передачи всего объекта
             result = analyze_shap(
                 trained_models=self.logic.trained_models,
                 X_train=self.logic.X_train,
                 shap_explainer=self.shap_explainer,
-                shap_values=self.shap_values,
+                shap_values=self.logic.shap_values,
                 X_sample=self.X_sample,
                 explainer_combo=self.explainer_combo,
                 sample_size_combo=self.sample_size_combo,
@@ -301,26 +287,38 @@ class FeatureImportanceSHAPUI(QWidget):
                 self.shap_explainer = result.get('explainer')
                 self.shap_values = result.get('shap_values')
                 self.X_sample = result.get('X_sample')
+                # Синхронизируем shap_values с логикой
+                self.logic.shap_values = self.shap_values
                 # Убедимся, что X_train и df тоже обновлены
                 self.X_train = self.logic.X_train
-                # self.df должно быть установлено через set_data
-                logger.info(f"Атрибуты UI обновлены: shap_values.shape={self.shap_values.shape if self.shap_values is not None else 'None'}, "
-                           f"X_sample.shape={self.X_sample.shape if self.X_sample is not None else 'None'}, "
-                           f"X_train is not None: {self.X_train is not None}")
+                
+                # Логирование значений важности после анализа SHAP и построения графика
+                if self.shap_values is not None:
+                    # Получаем имена признаков
+                    feature_names = self.X_train.columns.tolist()
+                    # Обработка различных типов shap_values
+                    if hasattr(self.shap_values, 'values'):
+                        # Для объектов Explanation, используемых в новых версиях SHAP
+                        shap_vals = self.shap_values.values
+                        # Для multi-output может быть массивом, берем первый выход
+                        if isinstance(shap_vals, np.ndarray) and shap_vals.ndim > 1:
+                            shap_vals = shap_vals[0] if shap_vals.shape[0] == len(feature_names) else shap_vals.mean(axis=0)
+                        mean_abs_shap = np.abs(shap_vals).mean(axis=0) if shap_vals.ndim > 1 else np.abs(shap_vals)
+                    else:
+                        # Для старого формата
+                        mean_abs_shap = np.abs(self.shap_values).mean(axis=0) if self.shap_values.ndim > 1 else np.abs(self.shap_values)
+                    # Создаем словарь с именами и значениями
+                    feature_importances = dict(zip(feature_names, mean_abs_shap))
+                    # Выводим в консоль
+                    print("[LOG] Значения важности признаков после анализа SHAP и построения графика:", feature_importances)
                 
                 # Теперь вызываем plot_shap с актуальными данными
                 explainer_type = self.explainer_combo.currentText()
                 self.plot_shap(explainer_type=explainer_type)
                 
-                logger.info("Анализ SHAP успешно завершен и данные обновлены.")
-                return result
-            else:
-                logger.warning("Анализ SHAP завершился без результата или с ошибкой.")
-                return None
-            
-        except Exception as e:
-            logger.error(f"Ошибка при выполнении анализа SHAP: {e}", exc_info=True)
-            return None
+                # После построения графика, активируем кнопку "Удалить колонки" через update_button_states
+                if self.update_button_states:
+                    self.update_button_states()
 
     def train_model(self):
         from .shap_interaction import train_model
@@ -338,12 +336,12 @@ class FeatureImportanceSHAPUI(QWidget):
 
     def plot_shap(self, explainer_type="Auto"):
         if self.shap_values is None:
-            logger.warning("plot_shap: shap_values is None, пропуск построения графика.")
+            print("plot_shap: shap_values is None, пропуск построения графика.")
             return
             
         # Проверка X_train
         if self.X_train is None:
-            logger.error("plot_shap: self.X_train is None, пропуск построения графика.")
+            print("plot_shap: self.X_train is None, пропуск построения графика.")
             return
 
         plot_type = self.plot_type_combo.currentText()
@@ -352,7 +350,7 @@ class FeatureImportanceSHAPUI(QWidget):
         # Используем внешний модуль для визуализации
         from .shap_plotting import plot_shap
         
-        logger.info(f"Начало построения графика SHAP: тип={plot_type}, сортировка={sort_order}")
+        print(f"Начало построения графика SHAP: тип={plot_type}, сортировка={sort_order}")
         
         widget, plot_data, _ = plot_shap(
             shap_values=self.shap_values,
@@ -361,11 +359,10 @@ class FeatureImportanceSHAPUI(QWidget):
             task_type=self.task_type,
             explainer_type=explainer_type,
             plot_type=plot_type,
-            sort_order=sort_order,
-            df=self.df
+            sort_order=sort_order
         )
 
-        logger.info(f"График SHAP построен и добавлен в интерфейс.")
+        print(f"График SHAP построен и добавлен в интерфейс.")
 
         # Подключаем сигналы кнопок
         show_btn = widget.layout().itemAt(1).layout().itemAt(0).widget()
@@ -403,7 +400,7 @@ class FeatureImportanceSHAPUI(QWidget):
     def show_full_shap_plot(self):
         """Отображает полный график в отдельном окне matplotlib"""
         if self.current_fig is None:
-            logger.warning("show_full_shap_plot: current_fig is None, пропуск отображения.")
+            print("show_full_shap_plot: current_fig is None, пропуск отображения.")
             return        
         # Показываем график
         plt.show()
@@ -442,20 +439,23 @@ class FeatureImportanceSHAPUI(QWidget):
                 elif plot_type == "Пчелиное гнездо":
                     fig = create_bee_swarm_plot(shap_values, X_sample, plot_data['features_display_names'], plot_data, plot_type, sort_order, task_type, explainer_type)
                     if fig is None:
-                        logger.error("create_bee_swarm_plot вернул None, используем альтернативный график")
+                        print("create_bee_swarm_plot вернул None, используем альтернативный график")
                         fig = create_bar_plot(shap_values, X_sample, features_display_names, plot_data, plot_type, sort_order, task_type, explainer_type, is_multi_output)
                     else:
-                        logger.info("График Пчелиное гнездо успешно построен")
+                        print("График Пчелиное гнездо успешно построен")
                 else:
                     raise ValueError(f"Неподдерживаемый тип графика: {plot_type}")
                 
-                # Проверяем, что фигура существует перед показом
-                if fig is not None and hasattr(fig, 'number'):
-                    plt.figure(fig.number)
-                    plt.show()
-                else:
-                    logger.error("Не удалось показать график: fig is None или не имеет атрибута number")
+                # Сохраняем фигуру в кэш
+                plot_data['fig'] = fig
+                
+                # Сохраняем фигуру в кэш
+                plot_data['fig'] = fig
+                
+                # Показываем фигуру
+                plt.figure(fig.number)
+                plt.show()
             except Exception as e:
                 error_msg = f"Не удалось перестроить график: {e}"
                 QMessageBox.critical(self, "Ошибка", error_msg)
-                logger.error(error_msg)
+                print(error_msg)

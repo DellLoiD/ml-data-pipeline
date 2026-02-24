@@ -21,6 +21,7 @@ class ShapUiLogic:
         self.feature_importances = {}
         self.task_type = "classification"
         self.process = psutil.Process(os.getpid())
+        self.shap_values = None
 
     def set_trained_model(self, model, model_name):
         """Устанавливает предварительно обученную модель извне."""
@@ -77,9 +78,11 @@ class ShapUiLogic:
     def update_button_states(self):
         """Обновляет состояние кнопок на основе текущего состояния."""
         model_trained = len(self.trained_models) > 0
+        shap_values_exist = self.shap_values is not None
         # Возвращаем состояние, так как UI обновляется отдельно
         return {
-            'analyze_btn_enabled': model_trained
+            'analyze_btn_enabled': model_trained,
+            'delete_columns_btn_enabled': shap_values_exist
         }
 
     def show_plot_help(self, parent=None):

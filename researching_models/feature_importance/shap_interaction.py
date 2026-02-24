@@ -47,6 +47,8 @@ def analyze_shap(trained_models, X_train, shap_explainer, shap_values, X_sample,
     
     if result['success']:
         logger.info("Анализ SHAP успешен, обновляем данные и строим график.")
+        logger.info(f"X_train.columns в shap_interaction перед возвратом: {X_train.columns.tolist() if X_train is not None and hasattr(X_train, 'columns') else 'No columns'}")
+        logger.info(f"Типы X_train.columns в shap_interaction: {[type(name).__name__ for name in X_train.columns] if X_train is not None and hasattr(X_train, 'columns') else 'No columns'}")
         
         # Возвращаем результат вместо обновления глобальных переменных
         return result
@@ -174,6 +176,11 @@ def show_single_plot(self, fig, plot_data):
             else:
                 raise ValueError(f"Неподдерживаемый тип графика: {plot_type}")
             
+            # Проверяем, что фигура создана
+            if fig is None:
+                logger.error("График не был создан - fig is None")
+                return
+                
             # Показываем фигуру
             plt.figure(fig.number)
             plt.show()
