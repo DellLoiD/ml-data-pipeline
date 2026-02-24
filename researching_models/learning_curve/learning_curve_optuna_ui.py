@@ -351,14 +351,6 @@ class LearningCurveOptunaTab(QWidget):
             # Кривая обучения
             lc_result = self.analyzer.compute_learning_curve(best_model, scoring=scoring, cv=cv, n_points=n_points, n_jobs_cv=n_jobs_cv, random_state=rs)
 
-            # Закрываем заглушку перед обновлением интерфейса
-            if self.loading_screen:
-                self.loading_screen.close()
-                logger.info("Заглушка закрыта перед отображением результатов")
-            
-            # Принудительное обновление интерфейса
-            QApplication.processEvents()
-
             # Отображение результатов
             logger.info("Отправка результатов в интерфейс...")
             logger.info(f"Данные для display_result: model_name={self.model_combo.currentText()}, final_val={lc_result['final_val']:.4f}, final_test={lc_result['final_test']:.4f}, gap={lc_result['gap']:.4f}, scoring={scoring}, best_params={best_params}")
@@ -373,6 +365,9 @@ class LearningCurveOptunaTab(QWidget):
             except Exception as e:
                 logger.error(f"Ошибка при вызове display_result: {e}")
                 raise
+            
+            # Принудительное обновление интерфейса
+            QApplication.processEvents()
 
             # Финальная очистка памяти после всего анализа
             gc.collect()
