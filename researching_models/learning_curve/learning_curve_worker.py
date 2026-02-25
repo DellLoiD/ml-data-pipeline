@@ -1,6 +1,8 @@
 from PySide6.QtCore import QThread, Signal
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, RandomForestRegressor, GradientBoostingRegressor
+import logging
 
+logger = logging.getLogger(__name__)
 
 class LearningCurveWorker(QThread):
     """
@@ -33,6 +35,7 @@ class LearningCurveWorker(QThread):
     def run(self):
         try:
             # Запуск Optuna
+            logger.info("Запуск Optuna study в фоновом потоке...")
             study = self.analyzer.run_optuna_study(
                 model_name=self.model_name,
                 n_trials=self.n_trials,
@@ -47,6 +50,7 @@ class LearningCurveWorker(QThread):
                 random_state=self.random_state,
                 optuna_n_jobs=self.optuna_n_jobs
             )
+            logger.info("Optuna study завершен, приступаем к построению кривой обучения.")
 
             if not study.best_trial:
                 self.error_occurred.emit("Оптимизация Optuna не нашла подходящих решений.")
@@ -66,6 +70,7 @@ class LearningCurveWorker(QThread):
                 n_jobs_cv=self.n_jobs_cv,
                 random_state=self.random_state
             )
+            logger.info("Кривая обучения успешно вычислена.")
 
             # Сбор результата
             result = {
@@ -77,8 +82,10 @@ class LearningCurveWorker(QThread):
             }
 
             self.result_ready.emit(result)
+            logger.info("Результат отправлен в основной поток.")
 
         except Exception as e:
+            logger.exception(f"Неожиданная ошибка в фоновом потоке: {e}")
             self.error_occurred.emit(str(e))
 
     def _get_model_class(self):
