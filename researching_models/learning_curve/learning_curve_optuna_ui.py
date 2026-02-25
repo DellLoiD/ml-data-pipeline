@@ -10,6 +10,7 @@ import gc
 
 from researching_models.learning_curve.learning_curve_optuna_logic import OptunaAnalyzer, logger
 from researching_models.check_models_loading_screen import LoadingScreen
+from researching_models.learning_curve.learning_curve_worker import LearningCurveWorker
 
 class HelpDialog(QDialog):
     """Справка по метрикам и параметрам"""
@@ -304,7 +305,7 @@ class LearningCurveOptunaTab(QWidget):
             # Показ заглушки
             self.loading_screen = LoadingScreen()
             self.loading_screen.show()
-            QApplication.processEvents()  # Обновляем интерфейс
+            QApplication.processEvents()  
 
             cv = int(self.curve_params['CV'].text())
             n_jobs_cv = int(self.curve_params['n_jobs'].text())
@@ -316,69 +317,66 @@ class LearningCurveOptunaTab(QWidget):
             max_depth = self.parse_range(self.max_depth_le.text(), int)
             lr = self.parse_range(self.learning_rate_le.text(), float)
 
-            # Запуск Optuna
-            optuna_n_jobs = int(self.optuna_n_jobs_le.text())
-            cv_n_jobs = int(self.cv_n_jobs_le.text())  # Используем новое поле
-
-            logger.info("Запуск анализа Optuna и кривой обучения...")
-            study = self.analyzer.run_optuna_study(
+            # Запуск в потоке
+            self.worker = LearningCurveWorker(
+                analyzer=self.analyzer,
                 model_name=self.model_combo.currentText(),
-                n_trials=n_trials, timeout=timeout, direction=direction, scoring=scoring,
-                n_est_range=n_est, max_depth_range=max_depth, learning_rate_range=lr,
-                cv=cv, n_jobs_cv=cv_n_jobs, random_state=rs,
-                optuna_n_jobs=optuna_n_jobs
+                n_trials=n_trials,
+                timeout=timeout,
+                direction=direction,
+                scoring=scoring,
+                n_est_range=n_est,
+                max_depth_range=max_depth,
+                learning_rate_range=lr,
+                cv=cv,
+                n_jobs_cv=n_jobs_cv,
+                random_state=rs,
+                optuna_n_jobs=int(self.optuna_n_jobs_le.text())
             )
-
-            # Принудительная очистка памяти после Optuna
-            gc.collect()
-
-            if not study.best_trial:
-                QMessageBox.warning(self, "Optuna", "Не найдено решений.")
-                logger.warning("Оптимизация Optuna не нашла подходящих решений.")
-                return
-            # Создание лучшей модели
-            best_params = study.best_params
-
-            if self.model_combo.currentText() == "Random Forest":
-                model_cls = RandomForestRegressor if self.analyzer.task_type == "regression" else RandomForestClassifier
-            elif self.model_combo.currentText() == "Gradient Boosting":
-                model_cls = GradientBoostingRegressor if self.analyzer.task_type == "regression" else GradientBoostingClassifier
-            else:
-                raise ValueError("Модель не поддерживается")
-
-            best_model = model_cls(**best_params, random_state=rs)
-
-            # Кривая обучения
-            lc_result = self.analyzer.compute_learning_curve(best_model, scoring=scoring, cv=cv, n_points=n_points, n_jobs_cv=n_jobs_cv, random_state=rs)
-
-            # Отображение результатов
-            logger.info("Отправка результатов в интерфейс...")
-            logger.info(f"Данные для display_result: model_name={self.model_combo.currentText()}, final_val={lc_result['final_val']:.4f}, final_test={lc_result['final_test']:.4f}, gap={lc_result['gap']:.4f}, scoring={scoring}, best_params={best_params}")
-            try:
-                self.display_result(
-                    model_name=f"{self.model_combo.currentText()} ({self.analyzer.task_type})",
-                    **lc_result,
-                    scoring=scoring,
-                    best_params=best_params
-                )
-                logger.info("Результаты успешно переданы в интерфейс.")
-            except Exception as e:
-                logger.error(f"Ошибка при вызове display_result: {e}")
-                raise
-            
-            # Принудительное обновление интерфейса
-            QApplication.processEvents()
-
-            # Финальная очистка памяти после всего анализа
-            gc.collect()
-            logger.info("Анализ Optuna и кривой обучения завершен. Результаты отображены.")
+            self.worker.result_ready.connect(self.on_worker_result_ready)
+            self.worker.error_occurred.connect(self.on_worker_error)
+            self.worker.start()
 
         finally:
-            # Всегда закрываем заглушку
-            if hasattr(self, 'loading_screen') and self.loading_screen:
-                self.loading_screen.close()
-                logger.info("Заглушка закрыта в блоке finally")            
-        
+            # Оставляем заглушку открытой — закроется из потока
+            pass
+
+    def on_worker_result_ready(self, result):
+        """Вызывается из потока при успешном завершении"""
+        try:
+            best_model = result['best_model']
+            lc_result = result['lc_result']
+            best_params = result['best_params']
+            scoring = result['scoring']
+            model_name = result['model_name']
+
+            logger.info("Отправка результатов в интерфейс...")
+            logger.info(f"Данные для display_result: model_name={model_name}, final_val={lc_result['final_val']:.4f}, final_test={lc_result['final_test']:.4f}, gap={lc_result['gap']:.4f}, scoring={scoring}, best_params={best_params}")
+            self.display_result(
+                model_name=f"{model_name} ({self.analyzer.task_type})",
+                **lc_result,
+                scoring=scoring,
+                best_params=best_params
+            )
+            logger.info("Результаты успешно переданы в интерфейс.")
+        except Exception as e:
+            logger.error(f"Ошибка при вызове display_result: {e}")
+            self.on_worker_error(str(e))
+        finally:
+            self._cleanup_loading_screen()
+
+    def on_worker_error(self, error_msg):
+        """Вызывается из потока при ошибке"""
+        QMessageBox.critical(self, "Ошибка", f"Произошла ошибка в фоновом потоке:\n{error_msg}")
+        logger.error(f"Ошибка в фоновом потоке: {error_msg}")
+        self._cleanup_loading_screen()
+
+    def _cleanup_loading_screen(self):
+        """Закрывает заглушку"""
+        if hasattr(self, 'loading_screen') and self.loading_screen:
+            self.loading_screen.close()
+            self.loading_screen = None
+            logger.info("Заглушка закрыта")
 
     def parse_range(self, text, dtype):
         text = text.strip()
